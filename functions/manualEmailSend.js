@@ -402,7 +402,12 @@ async function routeManualSend(templateKey, recipient, overrides, adminUid) {
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
         used: false,
       });
-      return emailService.sendCustomPasswordResetEmail(recipient.email, token);
+      const sent = await emailService.sendCustomPasswordResetEmail(recipient.email, token);
+      if (!sent) {
+        const { sendFirebasePasswordResetEmail } = require('./firebaseAuthEmailFallback');
+        await sendFirebasePasswordResetEmail(recipient.email);
+      }
+      return true;
     }
     if (templateKey === 'magicLink') {
       let exists = false;
@@ -413,14 +418,27 @@ async function routeManualSend(templateKey, recipient, overrides, adminUid) {
         if (e.code !== 'auth/user-not-found') throw e;
       }
       if (!exists) {
-        return emailService.sendUnregisteredMagicLinkEmail(recipient.email);
+        const sent = await emailService.sendUnregisteredMagicLinkEmail(recipient.email);
+        if (!sent) {
+          throw new HttpsError('internal', 'Email failed to send — Resend domain may not be verified');
+        }
+        return true;
       }
       const { getMagicLinkActionCodeSettings, toUniversalMagicLink } = require('./magicLinkUtils');
+      const actionCodeSettings = getMagicLinkActionCodeSettings();
       const firebaseLink = await admin.auth().generateSignInWithEmailLink(
         recipient.email,
-        getMagicLinkActionCodeSettings()
+        actionCodeSettings
       );
-      return emailService.sendMagicLinkEmail(recipient.email, toUniversalMagicLink(firebaseLink));
+      const sent = await emailService.sendMagicLinkEmail(
+        recipient.email,
+        toUniversalMagicLink(firebaseLink)
+      );
+      if (!sent) {
+        const { sendFirebaseEmailSignInLink } = require('./firebaseAuthEmailFallback');
+        await sendFirebaseEmailSignInLink(recipient.email, actionCodeSettings);
+      }
+      return true;
     }
     if (templateKey === 'unregisteredMagicLink') {
       return emailService.sendUnregisteredMagicLinkEmail(recipient.email);
@@ -656,7 +674,10 @@ exports.sendManualEmail = onCall(
     );
 
     if (!success) {
-      throw new HttpsError('internal', 'Email failed to send');
+      throw new HttpsError(
+        'internal',
+        'Email failed to send. Check Resend domain verification (thepepplanner.app) — recent failures show the sending domain is not verified.'
+      );
     }
 
     return {

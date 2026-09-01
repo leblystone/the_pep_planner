@@ -2112,14 +2112,28 @@ exports.requestPasswordReset = onCall(
         used: false
       });
 
-      // Send custom password reset email via Resend using your email templates
-      await emailService.sendCustomPasswordResetEmail(normalizedEmail, resetToken);
-      
-      logger.info(`✅ Custom password reset email sent to: ${normalizedEmail}`);
+      // Prefer branded Resend email; fall back to Firebase Auth email if Resend fails
+      // (e.g. sending domain not verified — otherwise users see "check inbox" with nothing delivered).
+      const sent = await emailService.sendCustomPasswordResetEmail(normalizedEmail, resetToken);
+      if (!sent) {
+        const { sendFirebasePasswordResetEmail } = require('./firebaseAuthEmailFallback');
+        await sendFirebasePasswordResetEmail(normalizedEmail);
+        logger.info(`✅ Password reset sent via Firebase fallback to: ${normalizedEmail}`);
+      } else {
+        logger.info(`✅ Custom password reset email sent to: ${normalizedEmail}`);
+      }
       return { success: true, message: 'Password reset email sent' };
       
     } catch (error) {
       logger.error('❌ Failed to send password reset email:', error);
+      // Last-resort Firebase OOB so lockouts are recoverable even when Resend is fully down
+      try {
+        const { sendFirebasePasswordResetEmail } = require('./firebaseAuthEmailFallback');
+        await sendFirebasePasswordResetEmail(normalizedEmail);
+        logger.info(`✅ Password reset sent via Firebase catch-fallback to: ${normalizedEmail}`);
+      } catch (fallbackErr) {
+        logger.error('❌ Firebase password-reset fallback also failed:', fallbackErr);
+      }
       // Don't reveal if user exists - return success anyway for security
       return { success: true, message: 'If an account exists, a password reset email has been sent' };
     }
@@ -7212,23 +7226,36 @@ exports.sendMagicLinkEmail = onCall(
 
       if (accountExists) {
         const { getMagicLinkActionCodeSettings, toUniversalMagicLink } = require('./magicLinkUtils');
+        const actionCodeSettings = getMagicLinkActionCodeSettings();
         const firebaseLink = await admin.auth().generateSignInWithEmailLink(
           normalizedEmail,
-          getMagicLinkActionCodeSettings()
+          actionCodeSettings
         );
         // Rewrite auth-domain URL → https://thepepplanner.app/magic-link?...
         // so Universal/App Links open the native app instead of a browser tab.
         const signInLink = toUniversalMagicLink(firebaseLink);
-        await emailService.sendMagicLinkEmail(normalizedEmail, signInLink);
-        logger.info(`✅ Magic link sent to existing user: ${normalizedEmail}`);
+        const sent = await emailService.sendMagicLinkEmail(normalizedEmail, signInLink);
+        if (!sent) {
+          const { sendFirebaseEmailSignInLink } = require('./firebaseAuthEmailFallback');
+          await sendFirebaseEmailSignInLink(normalizedEmail, actionCodeSettings);
+          logger.info(`✅ Magic link sent via Firebase fallback to: ${normalizedEmail}`);
+        } else {
+          logger.info(`✅ Magic link sent to existing user: ${normalizedEmail}`);
+        }
       } else {
-        await emailService.sendUnregisteredMagicLinkEmail(normalizedEmail);
+        const sent = await emailService.sendUnregisteredMagicLinkEmail(normalizedEmail);
+        if (!sent) {
+          // Can't invent an account — but don't pretend Resend succeeded.
+          logger.warn(`⚠️ Unregistered magic-link email failed (Resend down) for ${normalizedEmail}`);
+          throw new HttpsError('internal', 'Failed to send sign-in link. Please try again.');
+        }
         logger.info(`👋 Unregistered magic link email sent to: ${normalizedEmail}`);
       }
 
       return { success: true };
     } catch (error) {
       logger.error('❌ Failed to send magic link email:', error);
+      if (error instanceof HttpsError) throw error;
       throw new HttpsError('internal', 'Failed to send sign-in link. Please try again.');
     }
   }

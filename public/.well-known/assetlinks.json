@@ -8,7 +8,8 @@
       "namespace": "android_app",
       "package_name": "com.thepepplanner.app",
       "sha256_cert_fingerprints": [
-        "38:1A:E9:39:3E:A5:7B:CC:98:5D:A9:C1:6D:68:8A:88:0B:16:81:43:7F:5A:A5:98:23:C6:33:8E:42:93:28:5D"
+        "38:1A:E9:39:3E:A5:7B:CC:98:5D:A9:C1:6D:68:8A:88:0B:16:81:43:7F:5A:A5:98:23:C6:33:8E:42:93:28:5D",
+        "AC:2B:C2:F6:55:E1:6B:64:50:0E:12:A4:8F:93:28:D8:A6:15:C7:B8:2D:E4:E3:A3:1C:3F:ED:D0:E4:F9:02:8F"
       ]
     }
   }
