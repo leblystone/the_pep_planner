@@ -54,18 +54,13 @@ function DeliveryIndicator({ item, theme }) {
 
 function MarkAllButton({ date, timeSlot, scheduled, theme, onMarkAllDone, calendarBump }) {
   const dateKey = toKey(date)
-  const [completedCount, setCompletedCount] = useState(0)
-  const [totalTasks, setTotalTasks] = useState(0)
-  
-  // Calculate completion status
-  useEffect(() => {
+  const slotKey = timeSlot === 'AM' ? 'AM' : 'PM'
+
+  const { totalTasks, completedCount } = useMemo(() => {
     let total = 0
     let completed = 0
-    
-    const slotKey = timeSlot === 'AM' ? 'AM' : 'PM'
-    
-    // Count peptides
-    if (scheduled.peptides) {
+
+    if (scheduled?.peptides) {
       scheduled.peptides.forEach(peptide => {
         total++
         const task = {
@@ -83,9 +78,8 @@ function MarkAllButton({ date, timeSlot, scheduled, theme, onMarkAllDone, calend
         }
       })
     }
-    
-    // Count supplements
-    if (scheduled.supplements) {
+
+    if (scheduled?.supplements) {
       scheduled.supplements.forEach(supplement => {
         total++
         const suppData = typeof supplement === 'object' ? supplement : { name: supplement }
@@ -102,62 +96,9 @@ function MarkAllButton({ date, timeSlot, scheduled, theme, onMarkAllDone, calend
         }
       })
     }
-    
-    setTotalTasks(total)
-    setCompletedCount(completed)
-  }, [dateKey, timeSlot, scheduled, calendarBump])
-  
-  // Listen for completion changes
-  useEffect(() => {
-    const handleTaskCompletionChange = () => {
-      let total = 0
-      let completed = 0
-      const slotKey = timeSlot === 'AM' ? 'AM' : 'PM'
-      
-      if (scheduled.peptides) {
-        scheduled.peptides.forEach(peptide => {
-          total++
-          const task = {
-            type: 'peptide',
-            name: peptide.name,
-            dose: peptide.dose || '',
-            unit: peptide.unit || '',
-            time: slotKey,
-            protocolId: peptide.protocolId,
-            peptideId: peptide.peptideId
-          }
-          const taskId = generateTaskId(task)
-          if (isTaskCompleted(taskId, dateKey, slotKey)) {
-            completed++
-          }
-        })
-      }
-      
-      if (scheduled.supplements) {
-        scheduled.supplements.forEach(supplement => {
-          total++
-          const suppData = typeof supplement === 'object' ? supplement : { name: supplement }
-          const task = {
-            type: 'supplement',
-            name: suppData.name,
-            dose: suppData.dose || '',
-            unit: '',
-            time: slotKey
-          }
-          const taskId = generateTaskId(task)
-          if (isTaskCompleted(taskId, dateKey, slotKey)) {
-            completed++
-          }
-        })
-      }
-      
-      setTotalTasks(total)
-      setCompletedCount(completed)
-    }
-    
-    window.addEventListener('tpp:task-completion-changed', handleTaskCompletionChange)
-    return () => window.removeEventListener('tpp:task-completion-changed', handleTaskCompletionChange)
-  }, [dateKey, timeSlot, scheduled])
+
+    return { totalTasks: total, completedCount: completed }
+  }, [dateKey, slotKey, scheduled, calendarBump])
   
   if (totalTasks === 0) return null
   if (completedCount === totalTasks) {
@@ -317,6 +258,7 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
 
   /** Darker sage accent for Side Effects card (distinct from Notes primary, not alarm red). */
   const sideFxAccent = theme.primaryDark || theme.primary || '#5F7F76'
+  const dateBadgeBg = theme.primaryDark || theme.primary
 
   const injectionDayScope = useMemo(() => {
     if (!date) return { start: null, end: null }
@@ -555,11 +497,11 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                   {isToday ? 'Today' : dayOfWeek}
                 </h3>
                 <span 
-                  className="font-bold text-base flex items-center justify-center rounded-full w-9 h-9"
+                  className="font-bold tabular-nums text-base flex items-center justify-center rounded-lg w-9 h-9 ring-2 ring-white/90"
                   style={{
-                    backgroundColor: theme.primary,
+                    background: `linear-gradient(180deg, ${theme.primary} 0%, ${dateBadgeBg} 100%)`,
                     color: theme.textOnPrimary || '#ffffff',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
+                    boxShadow: `0 3px 10px ${dateBadgeBg}55, 0 1px 3px rgba(0,0,0,0.12)`,
                   }}
                 >
                   {date.getDate()}
@@ -602,11 +544,13 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={onClose}
-                  className="p-1.5 rounded-full hover:opacity-70 transition-all"
-                  style={{ color: theme.textLight, backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}
+                  className="p-0 hover:opacity-70 transition-opacity flex-shrink-0"
+                  style={{ color: theme.textLight }}
+                  aria-label="Close"
                 >
-                  <X size={18} />
+                  <X size={22} strokeWidth={2} />
                 </button>
               </div>
             </div>

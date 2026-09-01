@@ -1,13 +1,12 @@
 import React from 'react';
 import { Pill, ShoppingCart, CheckCircle, Syringe, FileText, Heartbeat } from '@phosphor-icons/react';
-import { areWashoutIconsEnabled, areGroupBuysEnabled } from '../../utils/featureSettings';
+import { areGroupBuysEnabled } from '../../utils/featureSettings';
 
 export default function CalendarIconKey({ theme, isVisible, onClose }) {
     if (!isVisible) return null;
 
     const iconColor = theme.isDark ? '#a8b5a0' : '#73796D';
     const sideFxAccent = theme.primaryDark || theme.primary || '#5F7F76';
-    const showWashoutIcons = areWashoutIconsEnabled();
     const groupBuysEnabled = areGroupBuysEnabled();
 
     const iconItems = [
@@ -21,16 +20,6 @@ export default function CalendarIconKey({ theme, isVisible, onClose }) {
             ),
             label: 'All Research Completed',
             description: 'Research is done marked as completed for the day.'
-        },
-        {
-            icon: (
-                <div
-                    className="w-5 h-5 rounded-full"
-                    style={{ backgroundColor: '#73796D' }}
-                />
-            ),
-            label: 'Research Remaining',
-            description: 'Remaining research still exists.'
         },
         {
             icon: <Syringe size={24} weight="duotone" style={{ color: iconColor }} />,
@@ -49,38 +38,13 @@ export default function CalendarIconKey({ theme, isVisible, onClose }) {
                 description: 'Scheduled purchases or group buys'
             }]
             : []),
-        ...(showWashoutIcons
-            ? [{
-                icon: (
-                    <span className="inline-flex items-center justify-center w-6 h-6 text-xs rounded border border-gray-300 text-gray-800 bg-gray-200 font-bold leading-none">
-                        W
-                    </span>
-                ),
-                label: 'Washout Period',
-                description: 'Protocol washout or break period'
-            }]
-            : []),
         {
-            icon: (
-                <span
-                    className="inline-flex items-center justify-center w-6 h-6 rounded border"
-                    style={{
-                        backgroundColor: theme.isDark ? `${sideFxAccent}28` : `${sideFxAccent}20`,
-                        borderColor: theme.isDark ? `${sideFxAccent}45` : `${sideFxAccent}35`,
-                    }}
-                >
-                    <Heartbeat size={14} weight="duotone" style={{ color: sideFxAccent }} />
-                </span>
-            ),
+            icon: <Heartbeat size={24} weight="duotone" style={{ color: sideFxAccent }} />,
             label: 'Side Effects',
             description: 'Side effects were logged for this day'
         },
         {
-            icon: (
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-300 text-gray-800 bg-gray-200">
-                    <FileText size={14} weight="bold" />
-                </span>
-            ),
+            icon: <FileText size={24} weight="duotone" style={{ color: iconColor }} />,
             label: 'Day Note',
             description: 'A note has been saved for this day'
         }

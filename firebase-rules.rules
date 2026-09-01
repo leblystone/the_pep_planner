@@ -421,6 +421,30 @@ service cloud.firestore {
       allow read: if isAdmin(); // Only admin can read deletion history
       allow write: if false; // Only Cloud Functions can write deletion records
     }
+
+    // Subscription reconciliation run history — Cloud Functions write, admin reads
+    match /reconciliationRuns/{runId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Subscription change log — Cloud Functions write, admin reads
+    match /subscriptionChangeLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Webhook failures (Google Play + Apple S2S unmatched events) — Cloud Functions write, admin reads
+    match /webhookFailures/{failureId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Orphan scan snapshots — Cloud Functions write, admin reads (persists last scan result)
+    match /subscriptionScans/{scanId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
     
     // PiP query log — Cloud Functions write (Admin SDK bypasses rules), admin reads
     match /pip_query_log/{logId} {

@@ -1223,6 +1223,13 @@ export async function getAdminSubscriptionReconciliationLog(opts = {}) {
   return result.data;
 }
 
+export async function scanAndFixSubscriptions() {
+  const functions = getFunctions();
+  const fn = httpsCallable(functions, 'scanAndFixSubscriptions', { timeout: 300000 });
+  const result = await fn({});
+  return result.data;
+}
+
 /**
  * Fetch aggregated activity history for a user (admin User Detail modal - Activity Log tab).
  * @param {string} userId - Firebase user ID

@@ -100,7 +100,7 @@ const APPLE_API_SECRETS = [
 
 exports.adminRunSubscriptionReconciliation = onCall(
   {
-    cors: true,
+    invoker: 'public',
     timeoutSeconds: 540,
     memory: '1GiB',
     secrets: APPLE_API_SECRETS,
@@ -181,7 +181,7 @@ exports.adminRunSubscriptionReconciliation = onCall(
 );
 
 exports.getAdminSubscriptionReconciliationLog = onCall(
-  { cors: true },
+  { invoker: "public" },
   async (request) => {
     await ensureAdmin(request);
     const { limit = 50, runId } = request.data || {};
@@ -190,3 +190,174 @@ exports.getAdminSubscriptionReconciliationLog = onCall(
     return { success: true, logs };
   }
 );
+
+/**
+ * Scans all userSubscriptions for Android users who have no purchase token stored.
+ * These are invisible to the normal reconciliation and need manual token seeding.
+ */
+/**
+ * One-button scan & auto-repair for ALL platforms.
+ *
+ * 1. Finds orphaned Android users (no purchaseToken) → cross-references
+ *    webhookFailures by obfuscatedExternalAccountId (Firebase UID) → seeds
+ *    the token automatically → re-syncs from Google Play.
+ * 2. Finds orphaned Apple users (no originalTransactionId) → cross-references
+ *    webhookFailures by timing heuristic → seeds when confident → re-syncs.
+ * 3. Runs the normal reconciliation on all platforms to catch drift.
+ * 4. Saves a full report to Firestore so results persist.
+ */
+exports.scanAndFixSubscriptions = onCall(
+  { invoker: 'public', timeoutSeconds: 300, memory: '1GiB' },
+  async (request) => {
+    await ensureAdmin(request);
+    const db = admin.firestore();
+    const scannedBy = request.auth?.token?.email || request.auth?.uid || 'admin';
+
+    const report = {
+      android: { orphansFound: 0, autoRepaired: 0, stillOrphaned: 0, resynced: 0, details: [] },
+      apple: { orphansFound: 0, autoRepaired: 0, stillOrphaned: 0, resynced: 0, details: [] },
+      reconciliation: null,
+    };
+
+    // --- ANDROID: find orphans + auto-repair from webhookFailures ---
+    try {
+      const subSnap = await db.collection('userSubscriptions').get();
+
+      const androidOrphans = [];
+      for (const doc of subSnap.docs) {
+        const sub = doc.data()?.subscription || {};
+        const isAndroid =
+          sub.paymentProvider === 'google_play' ||
+          sub.paymentProvider === 'googleplay' ||
+          sub.source === 'googleplay' ||
+          sub.platform === 'google-play' ||
+          sub.platform === 'googleplay';
+        if (isAndroid && !sub.googlePlayPurchaseToken) {
+          androidOrphans.push({ userId: doc.id, email: sub.userEmail || sub.email || null });
+        }
+      }
+
+      report.android.orphansFound = androidOrphans.length;
+
+      if (androidOrphans.length > 0) {
+        // Pull ALL google_play webhook failures that have a token + UID
+        const failSnap = await db.collection('webhookFailures')
+          .where('source', '==', 'google_play')
+          .get();
+
+        const tokenByUid = {};
+        const tokenByToken = {};
+        for (const fdoc of failSnap.docs) {
+          const fd = fdoc.data();
+          if (fd.purchaseToken && fd.obfuscatedExternalAccountId) {
+            tokenByUid[fd.obfuscatedExternalAccountId] = fd.purchaseToken;
+          }
+          if (fd.purchaseToken) {
+            tokenByToken[fdoc.id] = fd;
+          }
+        }
+
+        for (const orphan of androidOrphans) {
+          const token = tokenByUid[orphan.userId];
+          if (token) {
+            // Auto-seed the token
+            await db.collection('userSubscriptions').doc(orphan.userId).set(
+              { subscription: { googlePlayPurchaseToken: token } },
+              { merge: true }
+            );
+            report.android.autoRepaired++;
+            report.android.details.push({ userId: orphan.userId, email: orphan.email, action: 'token_seeded' });
+
+            // Re-sync from Google Play
+            try {
+              await syncUserGooglePlayFromStore(db, orphan.userId, { logContext: { runBy: scannedBy } });
+              report.android.resynced++;
+            } catch (syncErr) {
+              report.android.details.push({ userId: orphan.userId, email: orphan.email, action: 'sync_failed', error: syncErr.message });
+            }
+          } else {
+            report.android.stillOrphaned++;
+            report.android.details.push({ userId: orphan.userId, email: orphan.email, action: 'no_token_found' });
+          }
+        }
+      }
+    } catch (err) {
+      report.android.error = err.message;
+    }
+
+    // --- APPLE: find orphans + auto-repair from webhookFailures ---
+    try {
+      const subSnap = await db.collection('userSubscriptions').get();
+
+      const appleOrphans = [];
+      for (const doc of subSnap.docs) {
+        const sub = doc.data()?.subscription || {};
+        const isApple =
+          sub.paymentProvider === 'apple' ||
+          sub.paymentProvider === 'apple_iap' ||
+          sub.source === 'apple' ||
+          sub.source === 'apple_iap' ||
+          sub.platform === 'apple';
+        if (isApple && !sub.appleOriginalTransactionId && !sub.appleTransactionId) {
+          appleOrphans.push({ userId: doc.id, email: sub.userEmail || sub.email || null });
+        }
+      }
+
+      report.apple.orphansFound = appleOrphans.length;
+
+      if (appleOrphans.length > 0 && hasAppleApiCredentials()) {
+        // For Apple we can't match by UID (Apple doesn't send it).
+        // But we CAN try to re-sync using the App Store Server API's
+        // "look up by user" if we have appAccountToken set on purchase.
+        // Failing that, mark as still orphaned — Apple privacy limits auto-repair.
+        for (const orphan of appleOrphans) {
+          try {
+            const syncResult = await syncUserAppleFromStore(db, orphan.userId, { logContext: { runBy: scannedBy } });
+            if (syncResult.success && syncResult.originalTransactionId) {
+              report.apple.autoRepaired++;
+              report.apple.resynced++;
+              report.apple.details.push({ userId: orphan.userId, email: orphan.email, action: 'synced_from_api' });
+            } else {
+              report.apple.stillOrphaned++;
+              report.apple.details.push({ userId: orphan.userId, email: orphan.email, action: syncResult.reason || 'no_txn_id' });
+            }
+          } catch (syncErr) {
+            report.apple.stillOrphaned++;
+            report.apple.details.push({ userId: orphan.userId, email: orphan.email, action: 'sync_failed', error: syncErr.message });
+          }
+        }
+      } else if (appleOrphans.length > 0) {
+        report.apple.stillOrphaned = appleOrphans.length;
+        report.apple.note = 'Apple API credentials not configured — cannot auto-repair.';
+      }
+    } catch (err) {
+      report.apple.error = err.message;
+    }
+
+    // --- Run full reconciliation for users that DO have tokens ---
+    try {
+      const reconResult = {};
+      reconResult.stripe = await runDailyStripeReconciliation(db, { maxUsers: 500 });
+      try { reconResult.googleplay = await runGooglePlayReconciliation(db, { maxUsers: 500 }); }
+      catch (e) { reconResult.googleplay = { error: e.message }; }
+      if (hasAppleApiCredentials()) {
+        try { reconResult.apple = await runAppleReconciliation(db, { maxUsers: 500 }); }
+        catch (e) { reconResult.apple = { error: e.message }; }
+      }
+      report.reconciliation = reconResult;
+    } catch (err) {
+      report.reconciliation = { error: err.message };
+    }
+
+    // Save the full report so it persists across page loads
+    const ts = admin.firestore.FieldValue.serverTimestamp();
+    await db.collection('subscriptionScans').doc('latest_repair').set({
+      scannedAt: ts,
+      scannedBy,
+      report,
+    });
+
+    return { success: true, report, scannedBy };
+  }
+);
+

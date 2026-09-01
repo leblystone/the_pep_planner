@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import BottomSheet from '../common/BottomSheet';
-import { logSideEffect, updateSideEffect } from '../../utils/sideEffectsLog';
+import { logSideEffect, updateSideEffect, deleteSideEffect } from '../../utils/sideEffectsLog';
 import {
   SmileyWink, Syringe, WarningCircle, BatteryLow,
   Skull, Headphones, Balloon, MoonStars,
@@ -43,6 +43,7 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
     const [otherText, setOtherText]     = useState('');
     const [animDir, setAnimDir]         = useState('forward');
     const [linkedProtocol, setLinkedProtocol] = useState(null);
+    const [confirmDelete, setConfirmDelete] = useState(false);
     const contentRef = useRef(null);
 
     const primary = theme?.primary || '#7F9E95';
@@ -76,6 +77,7 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
             setAnimDir('forward');
             setLinkedProtocol(protocol || null);
         }
+        setConfirmDelete(false);
     }, [open, editEntry, protocol, protocols]);
 
     const reset = useCallback(() => {
@@ -86,6 +88,7 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
         setOtherText('');
         setAnimDir('forward');
         setLinkedProtocol(null);
+        setConfirmDelete(false);
     }, []);
 
     const handleClose = useCallback(() => {
@@ -147,6 +150,19 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
         reset();
         onClose?.();
     }, [selected, severity, notes, otherText, linkedProtocol, date, logSource, editEntry, reset, onClose]);
+
+    const handleDelete = useCallback(() => {
+        if (!editEntry?.id) return;
+        if (confirmDelete) {
+            deleteSideEffect(editEntry.id);
+            toastSideEffectLogged('Side effect removed.');
+            setConfirmDelete(false);
+            reset();
+            onClose?.();
+        } else {
+            setConfirmDelete(true);
+        }
+    }, [confirmDelete, editEntry, reset, onClose]);
 
     useEffect(() => {
         if (contentRef.current) {
@@ -324,15 +340,27 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
                                 </div>
                             )}
 
-                            {/* Save */}
-                            <button
-                                type="button"
-                                onClick={handleSave}
-                                className="w-full rounded-xl py-3 text-sm font-bold text-white active:scale-[0.98] transition-all"
-                                style={{ backgroundColor: primary, boxShadow: `0 2px 8px ${primary}40` }}
-                            >
-                                {editEntry ? 'Update' : 'Save'}
-                            </button>
+                            {/* Save / Update + Delete (edit) */}
+                            <div className={`flex items-center gap-3 w-full pt-1 ${editEntry ? 'justify-between' : 'justify-end'}`}>
+                                {editEntry ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleDelete}
+                                        className={`py-2 text-sm font-medium transition-all touch-manipulation underline-offset-2 hover:underline ${confirmDelete ? 'tap-confirm-pop underline' : ''}`}
+                                        style={{ color: confirmDelete ? '#8B5335' : '#C67A5C' }}
+                                    >
+                                        {confirmDelete ? 'Tap again to confirm' : 'Delete'}
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={handleSave}
+                                    className="shrink-0 px-6 py-2 rounded-xl text-sm font-bold text-white active:scale-[0.98] transition-all"
+                                    style={{ backgroundColor: primary, boxShadow: `0 2px 8px ${primary}40` }}
+                                >
+                                    {editEntry ? 'Update' : 'Save'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

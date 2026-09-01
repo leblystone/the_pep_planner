@@ -2372,12 +2372,12 @@ function BillingContextBanner({ user, theme }) {
       </p>
       {badgeChannel === 'android_native' && (
         <p className="text-[10px] font-semibold mt-1" style={{ color: '#15803d' }}>
-          To grant Play access manually → expand <em>Subscription fixes</em> below and open <em>Manual Play grant</em>.
+          Run <em>Subscription sync → Step 1</em> below first. If that finds nothing, follow Step 2 to collect their Play order ID.
         </p>
       )}
       {badgeChannel === 'ios_native' && (
         <p className="text-[10px] font-semibold mt-1" style={{ color: '#4338ca' }}>
-          To grant App Store access manually → expand <em>Subscription fixes</em> below and open <em>Manual App Store grant</em>.
+          Run <em>Subscription sync → Step 1</em> below first. If that finds nothing, follow Step 2 to collect their App Store transaction ID.
         </p>
       )}
     </div>
@@ -2395,49 +2395,112 @@ function SubscriptionFixesSection({ user, theme, defaultOpen = false }) {
   const showStripe = ctx.showStripeTools;
   const showApple = ctx.showAppleTools;
   const showAndroid = ctx.showAndroidTools;
-  const toolCount = [showStripe, showApple, showAndroid].filter(Boolean).length;
+
+  // Detect which store IDs are missing — these are why sync can't auto-fix
+  const missingStripe = !subscription.stripeCustomerId && !subscription.customerId && !subscription.stripeSubscriptionId;
+  const missingPlay = !subscription.googlePlayPurchaseToken;
+  const missingApple = !subscription.appStoreTransactionId && !subscription.originalTransactionId && !subscription.appStoreProductId;
+
+  const missingItems = [
+    showStripe && missingStripe && {
+      store: 'Stripe',
+      color: theme.info,
+      missing: 'stripeCustomerId',
+      ask: 'Ask the user for the email they used at checkout. Search that email in the Stripe dashboard to find their customer ID.',
+    },
+    showAndroid && missingPlay && {
+      store: 'Google Play',
+      color: '#3DDC84',
+      missing: 'googlePlayPurchaseToken',
+      ask: 'Ask the user to go to Google Play → Subscriptions and share their Order ID. You can also find it in the Play Console under the user\'s email.',
+    },
+    showApple && missingApple && {
+      store: 'Apple App Store',
+      color: '#4338ca',
+      missing: 'appStoreTransactionId',
+      ask: 'Ask the user to go to Settings → Apple ID → Subscriptions and share their receipt or transaction date. Search their email in App Store Connect.',
+    },
+  ].filter(Boolean);
 
   return (
     <AdminCollapsibleSection
-      title={toolCount === 1 ? 'Fix for this channel' : 'Subscription fixes'}
+      title="Subscription sync"
       icon={ArrowsClockwise}
       theme={theme}
       defaultOpen={defaultOpen || hasNoMeaningfulSub}
-      help={
-        <AdminSectionHelp title="When to use" theme={theme}>
-          <p>
-            <strong>Web/Stripe:</strong> sync or grant when checkout succeeded but Firestore is empty.
-          </p>
-          <p className="mt-1">
-            <strong>iOS/Android:</strong> use the matching store grant — never Stripe for App Store or Play purchases.
-          </p>
-        </AdminSectionHelp>
-      }
     >
+      {/* Step 1: Sync — always the first action */}
+      <div className="space-y-1 mb-1">
+        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: theme.textLight }}>
+          Step 1 — Pull current status from all stores
+        </p>
+        <p className="text-[10px]" style={{ color: theme.textLight }}>
+          This reads the user's current subscription directly from Stripe, Google Play, and Apple and writes the correct status to Firestore. Run this first.
+        </p>
+      </div>
       <SyncAllPlatformsButton user={user} theme={theme} />
 
-      {ctx.store === 'unknown' && (
-        <p className="text-[10px] px-1" style={{ color: theme.textLight }}>
-          Billing source unknown — ask the user which store they purchased from, then use the matching manual grant below if sync doesn't find them.
-        </p>
+      {/* Step 2: If sync returned nothing — explain what's missing and what to collect */}
+      {missingItems.length > 0 && (
+        <AdminCollapsibleSection
+          title={`Step 2 — Why sync may return nothing (${missingItems.length} missing link${missingItems.length > 1 ? 's' : ''})`}
+          theme={theme}
+          defaultOpen={false}
+        >
+          <div className="space-y-3">
+            <p className="text-[11px]" style={{ color: theme.textLight }}>
+              Sync reads from the stores using IDs that should have been saved when the user purchased. If those IDs are missing from Firestore, sync can't find their subscription. Here's what's missing and how to collect it:
+            </p>
+            {missingItems.map(({ store, color, missing, ask }) => (
+              <div key={store} className="p-2.5 rounded-lg space-y-1" style={{ backgroundColor: color + '10', border: `1px solid ${color}30` }}>
+                <p className="text-[11px] font-semibold" style={{ color }}>
+                  {store} — <code className="text-[10px]">{missing}</code> not on file
+                </p>
+                <p className="text-[11px]" style={{ color: theme.textLight }}>{ask}</p>
+                <p className="text-[10px] mt-1" style={{ color: theme.textLight }}>
+                  Once you have the ID, use the emergency override below to save it alongside the grant so future syncs will work automatically.
+                </p>
+              </div>
+            ))}
+          </div>
+        </AdminCollapsibleSection>
       )}
 
-      {/* Manual grants — only needed when sync can't fix it (webhook missed the purchase) */}
-      {showStripe && (
-        <AdminCollapsibleSection title="Manual Stripe grant" theme={theme} defaultOpen={ctx.store === 'stripe'}>
-          <AdminStripeGrantButton user={user} theme={theme} />
-        </AdminCollapsibleSection>
-      )}
-      {showApple && (
-        <AdminCollapsibleSection title="Manual App Store grant" theme={theme} defaultOpen={ctx.store === 'apple'}>
-          <SyncAppleIAPButton user={user} theme={theme} />
-        </AdminCollapsibleSection>
-      )}
-      {showAndroid && (
-        <AdminCollapsibleSection title="Manual Play grant" theme={theme} defaultOpen={ctx.store === 'googleplay'}>
-          <AdminAndroidGrantButton user={user} theme={theme} />
-        </AdminCollapsibleSection>
-      )}
+      {/* Step 3: Emergency override — only when you have confirmed purchase info */}
+      <AdminCollapsibleSection
+        title="Step 3 — Emergency override (last resort)"
+        theme={theme}
+        defaultOpen={false}
+      >
+        <div className="space-y-3">
+          <div className="p-2.5 rounded-lg" style={{ backgroundColor: theme.error + '08', border: `1px solid ${theme.error}25` }}>
+            <p className="text-[11px] font-semibold" style={{ color: theme.error }}>Only use this when:</p>
+            <ul className="mt-1 space-y-0.5 list-disc list-inside" style={{ color: theme.textLight }}>
+              <li className="text-[10px]">You've confirmed the purchase with the user</li>
+              <li className="text-[10px]">You have the purchase token, transaction ID, or Stripe customer ID</li>
+              <li className="text-[10px]">Sync ran and found nothing because the IDs were missing</li>
+            </ul>
+            <p className="text-[10px] mt-1.5" style={{ color: theme.textLight }}>
+              Saving the purchase ID alongside the grant means automatic sync will work going forward — don't skip it.
+            </p>
+          </div>
+          {showStripe && (
+            <AdminCollapsibleSection title="Stripe manual grant" theme={theme} defaultOpen={false}>
+              <AdminStripeGrantButton user={user} theme={theme} />
+            </AdminCollapsibleSection>
+          )}
+          {showApple && (
+            <AdminCollapsibleSection title="App Store manual grant" theme={theme} defaultOpen={false}>
+              <SyncAppleIAPButton user={user} theme={theme} />
+            </AdminCollapsibleSection>
+          )}
+          {showAndroid && (
+            <AdminCollapsibleSection title="Google Play manual grant" theme={theme} defaultOpen={false}>
+              <AdminAndroidGrantButton user={user} theme={theme} />
+            </AdminCollapsibleSection>
+          )}
+        </div>
+      </AdminCollapsibleSection>
     </AdminCollapsibleSection>
   );
 }
@@ -2614,10 +2677,9 @@ function SubscriptionDebugSection({ user, theme }) {
               </div>
             )}
 
-            {/* Sync lives in "Subscription fixes" above — use the Sync All button there */}
             {(!subscription.status || Object.keys(subscription).length === 0) && (
               <p className="text-[11px] mt-2 px-1" style={{ color: theme.textLight }}>
-                No subscription data found. Use <strong>Subscription fixes → Sync all stores</strong> above to pull from Stripe, Google Play, or Apple.
+                No subscription data in Firestore. Use <strong>Subscription sync → Step 1</strong> above to pull from Stripe, Google Play, or Apple. If sync finds nothing, Step 2 explains what IDs are missing.
               </p>
             )}
 

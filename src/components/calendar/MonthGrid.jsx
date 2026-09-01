@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { formatMMDDYYYY } from '../../pages/../utils/date'
-import { Pill, ShoppingCart, TestTube, CheckCircle, PenNib, Syringe, SprayBottle, HandPalm, FileText, Flag, Heartbeat } from '@phosphor-icons/react'
+import { Pill, ShoppingCart, TestTube, PenNib, Syringe, SprayBottle, HandPalm, FileText, Flag, Heartbeat } from '@phosphor-icons/react'
 import { isTaskCompleted, generateTaskId } from '../../utils/taskCompletion'
 import { getChromeGradient } from '../../utils/recon'
 import { penColors } from '../../utils/penColors'
-import { areWashoutIconsEnabled, areGroupBuysEnabled } from '../../utils/featureSettings'
+import { areGroupBuysEnabled } from '../../utils/featureSettings'
 import { getNotesForDate } from '../../utils/protocolHistory'
 import { getCalendarNoteText } from '../../utils/calendarNotesMigration'
 import { loadSideEffects } from '../../utils/sideEffectsLog'
@@ -115,28 +115,6 @@ function DoseIconGroup({ peptideDoseCount, supplementDoseCount, buyCount, groupB
                 </span>
             )}
         </div>
-    );
-}
-
-function DayIndicatorBadge({ theme, title, children, variant = 'neutral' }) {
-    const sideFxAccent = theme.primaryDark || theme.primary || '#5F7F76';
-    const isSideFx = variant === 'sideFx';
-
-    return (
-        <span
-            className="inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 rounded border leading-none"
-            style={isSideFx ? {
-                backgroundColor: theme.isDark ? `${sideFxAccent}28` : `${sideFxAccent}20`,
-                borderColor: theme.isDark ? `${sideFxAccent}45` : `${sideFxAccent}35`,
-            } : {
-                backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
-                borderColor: theme.isDark ? 'rgba(255,255,255,0.15)' : '#d1d5db',
-                color: theme.isDark ? theme.text : '#1f2937',
-            }}
-            title={title}
-        >
-            {children}
-        </span>
     );
 }
 
@@ -269,8 +247,6 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
     ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   
-  // Check if washout icons should be shown
-  const showWashoutIcons = areWashoutIconsEnabled();
   // Check if group buys are enabled
   const groupBuysEnabled = areGroupBuysEnabled();
   
@@ -303,7 +279,6 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                     ];
                     const peptideDoseCount = (sched.bySlot?.AM?.peptides?.length || 0) + (sched.bySlot?.PM?.peptides?.length || 0);
                     const supplementDoseCount = allSupplements.length;
-                    const hasWashout = showWashoutIcons && sched.washout && sched.washout.length > 0;
                     // Get unique delivery methods for icon display
                     const deliveryMethods = [...new Set(allSupplements.map(s => typeof s === 'object' ? s.delivery : 'oral'))];
                     const primaryDelivery = deliveryMethods[0] || 'oral';
@@ -378,10 +353,12 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                     const showDesktopNames = nameLimit > 0 && allTaskNames.length > 0;
                     const showDesktopIconsOnly = nameLimit > 0 && !showDesktopNames && hasActivity;
 
+                    const todayBadgeBg = theme.primaryDark || theme.primary;
+
                     return (
-                        <button key={i} className={`p-1 sm:p-2 md:p-3 rounded-lg text-left hover:shadow-md transition-all duration-200 flex flex-col relative h-full min-h-0 overflow-hidden ${allTasksCompleted ? 'opacity-60' : ''} ${isToday && todayPulse ? 'animate-pulse' : ''} ${hasWashout ? 'max-sm:shadow-[inset_0_0_0_1.5px_rgba(200,122,92,0.28)]' : ''}`} style={{ 
+                        <button key={i} className={`p-1 sm:p-2 md:p-3 rounded-lg text-left hover:shadow-md transition-all duration-200 flex flex-col relative h-full min-h-0 overflow-hidden ${allTasksCompleted ? 'opacity-60' : ''} ${isToday && todayPulse ? 'animate-pulse' : ''}`} style={{ 
                             border: isToday 
-                              ? `1.5px solid ${theme.isDark ? theme.primary + '50' : theme.primary + '45'}`
+                              ? `2px solid ${theme.isDark ? theme.primary + '70' : todayBadgeBg + '90'}`
                               : `1px solid ${allTasksCompleted ? (theme.isDark ? '#4b5563' : '#D1D5DB') : theme.border}`,
                             background: d ? (
                                 isToday
@@ -401,10 +378,14 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                             <div className="flex flex-col h-full min-h-0 relative">
                                 {/* Date row */}
                                 <div className="flex items-start justify-between mb-1">
-                                    <span className={`text-sm sm:text-base md:text-xl font-bold ${isToday ? 'bg-white rounded-full w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 flex justify-center items-center text-xs sm:text-sm md:text-xl' : ''}`} style={{ 
-                                        backgroundColor: isToday ? theme.primary : 'transparent',
-                                        color: isToday ? theme.textOnPrimary : (d ? (theme.isDark ? theme.text : theme.primaryDark) : theme.textLight),
-                                        boxShadow: isToday ? `0 2px 8px ${theme.primary}40` : 'none',
+                                    <span className={`font-bold tabular-nums ${isToday ? 'rounded-lg w-7 h-7 sm:w-9 sm:h-9 md:w-11 md:h-11 flex justify-center items-center text-sm sm:text-base md:text-xl ring-2 ring-white/90' : 'text-sm sm:text-base md:text-xl'}`} style={{ 
+                                        background: isToday
+                                          ? `linear-gradient(180deg, ${theme.primary} 0%, ${todayBadgeBg} 100%)`
+                                          : 'transparent',
+                                        color: isToday ? (theme.textOnPrimary || '#ffffff') : (d ? (theme.isDark ? theme.text : theme.primaryDark) : theme.textLight),
+                                        boxShadow: isToday
+                                          ? `0 3px 10px ${todayBadgeBg}55, 0 1px 3px rgba(0,0,0,0.12)`
+                                          : 'none',
                                     }}>
                                         {d ? d.getDate() : ''}
                                     </span>
@@ -421,25 +402,6 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                                         title={planChangeTitle || 'Plan changed'}
                                     >
                                         <Flag size={10} weight="fill" style={{ color: '#B8860B' }} aria-hidden />
-                                    </div>
-                                )}
-                                {d && (
-                                    <div className="absolute top-1 right-1 hidden sm:block">
-                                        {allTasksCompleted ? (
-                                            <CheckCircle 
-                                                size={14}
-                                                className="sm:size-4 md:size-5 flex-shrink-0" 
-                                                weight="fill"
-                                                style={{ color: '#4CAF50' }}
-                                                title="All tasks completed"
-                                            />
-                                        ) : (
-                                            <div 
-                                                className="w-2 h-2 sm:w-2.5 sm:h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0" 
-                                                style={{ backgroundColor: '#73796D' }}
-                                                title={`${completedTasks}/${totalTasks} tasks completed`}
-                                            />
-                                        )}
                                     </div>
                                 )}
 
@@ -519,50 +481,28 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                                 )}
 
                                 <div className="mt-auto flex-shrink-0 w-full min-w-0">
-                                {/* Bottom indicators — side effects & notes on mobile; washout badge tablet+ */}
+                                {/* Bottom indicators — bare centered duotone icons (notes, side effects) */}
                                 {(daySideEffects.length > 0 || entryText) && (
-                                    <div className="flex items-center justify-center gap-2 max-w-full min-w-0 sm:hidden py-0.5">
+                                    <div className="flex items-center justify-center gap-2 sm:gap-2.5 max-w-full min-w-0 py-0.5">
                                         {entryText && (
                                             <FileText
-                                                size={18}
+                                                size={22}
                                                 weight="duotone"
-                                                style={{ color: iconColor }}
+                                                color={iconColor}
+                                                className="flex-shrink-0 max-sm:!w-[18px] max-sm:!h-[18px]"
                                                 title={entryText}
+                                                aria-hidden
                                             />
                                         )}
                                         {daySideEffects.length > 0 && (
                                             <Heartbeat
-                                                size={18}
+                                                size={22}
                                                 weight="duotone"
-                                                style={{ color: sideFxAccent }}
+                                                color={sideFxAccent}
+                                                className="flex-shrink-0 max-sm:!w-[18px] max-sm:!h-[18px]"
                                                 title={`Side effects (${daySideEffects.length}): ${daySideEffects.map((e) => e.label || e.effect).join(', ')}`}
+                                                aria-hidden
                                             />
-                                        )}
-                                    </div>
-                                )}
-                                {(hasWashout || daySideEffects.length > 0 || entryText) && (
-                                    <div className="hidden sm:flex flex-wrap items-center justify-start gap-1.5 max-w-full min-w-0">
-                                        {hasWashout && (
-                                            <DayIndicatorBadge
-                                                theme={theme}
-                                                title={`Washout: ${sched.washout.map(w => typeof w === 'object' && w !== null ? w.name : w).join(', ')}`}
-                                            >
-                                                <span className="text-[9px] sm:text-[10px] font-bold leading-none">W</span>
-                                            </DayIndicatorBadge>
-                                        )}
-                                        {entryText && (
-                                            <DayIndicatorBadge theme={theme} title={entryText}>
-                                                <FileText className="w-2.5 h-2.5 sm:w-3 sm:h-3" weight="bold" />
-                                            </DayIndicatorBadge>
-                                        )}
-                                        {daySideEffects.length > 0 && (
-                                            <DayIndicatorBadge
-                                                theme={theme}
-                                                variant="sideFx"
-                                                title={`Side effects (${daySideEffects.length}): ${daySideEffects.map((e) => e.label || e.effect).join(', ')}`}
-                                            >
-                                                <Heartbeat className="w-2.5 h-2.5 sm:w-3 sm:h-3" weight="duotone" style={{ color: sideFxAccent }} />
-                                            </DayIndicatorBadge>
                                         )}
                                     </div>
                                 )}

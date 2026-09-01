@@ -737,7 +737,7 @@ export function useTierAccess() {
     const canEnableBuddyMode = hasBuddyAccess;
     const canSyncToCloud = hasCloudSync;
 
-    return {
+    return useMemo(() => ({
         // Tier identity
         tier: effectiveTier,
         isFounder,
@@ -773,6 +773,31 @@ export function useTierAccess() {
 
         // For debugging / admin views
         _raw: { subscription, userId: firebaseUser?.uid },
-    };
+    }), [
+        effectiveTier,
+        isFounder,
+        isFree,
+        hasAIAccess,
+        hasBuddyAccess,
+        hasDirectoryAccess,
+        hasAdvancedInsights,
+        hasCloudSync,
+        hasPremiumThemes,
+        canAddProtocol,
+        canAddStockpileItem,
+        canAddSupplement,
+        canAddMedication,
+        canAddOrder,
+        canAddVendor,
+        canSaveCalc,
+        canStartAIChat,
+        canEnableBuddyMode,
+        canSyncToCloud,
+        caps,
+        medicationCount,
+        features.aiDailyQuota,
+        subscription,
+        firebaseUser?.uid,
+    ]);
 }
 

@@ -164,7 +164,8 @@ export default function Calendar() {
   const { theme } = useOutletContext()
   const { protocols, reconItems, supplements, orders, metrics, calendarNotes, updateCalendarNote, scheduledBuys, setCalendarNotes, subscription, oneOffDoses, medications } = useAppContext();
   const { isReadOnly, isDowngraded, isTrialExpired, isSubscriptionEnded } = useSubscriptionAccess();
-  const caps = useTierAccess();
+  const { caps: tierCaps } = useTierAccess();
+  const capsEnforced = tierCaps?.enforced ?? false;
   const { firebaseUser } = useFirebase();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [goals, setGoals] = useState([]);
@@ -429,7 +430,7 @@ export default function Calendar() {
             // This is the SAME function used by DayModal, Dashboard, and notifications
             // ========================================
             const dayDate = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-            const dayTasks = calculateScheduledTasksForDate(dayDate, prots, supps, reconItems, medications, !!caps?.enforced)
+            const dayTasks = calculateScheduledTasksForDate(dayDate, prots, supps, reconItems, medications, capsEnforced)
             
             // Merge calculated tasks with existing supplement data already in next[key]
             const existingBySlot = next[key]?.bySlot || {}
@@ -638,42 +639,22 @@ export default function Calendar() {
           console.error('[Calendar Debug] Error in loadData:', e);
           console.error('Error stack:', e.stack);
         }
-  }, [currentDate, done, protocols, reconItems, supplements, medications, orders, metrics, theme, scheduledBuys, calendarBump, goals, viewMode, oneOffDoses, caps]);
+  }, [currentDate, done, protocols, reconItems, supplements, medications, orders, metrics, scheduledBuys, calendarBump, goals, viewMode, oneOffDoses, capsEnforced]);
 
   useEffect(() => {
     loadData(); // Initial load
   }, [loadData]);
 
-  // Debug: Monitor data availability and log when it changes
+  // One-shot bump when protocol/supplement data first arrives (Android cold-start fix).
+  // Avoid depending on `scheduled` object identity — empty {} from loadData retriggered forever.
+  const dataArrivalBumpRef = React.useRef(false);
   useEffect(() => {
-    const dataStatus = {
-      protocols: protocols?.length || 0,
-      supplements: supplements?.length || 0,
-      reconItems: reconItems?.length || 0,
-      scheduledBuys: scheduledBuys?.length || 0,
-      scheduledKeys: Object.keys(scheduled || {}).length
-    };
-    
-    // Log when data becomes available (especially useful for Android debugging)
-    if (dataStatus.protocols > 0 || dataStatus.supplements > 0) {
-      // Data is available - calendar should render properly
-    }
-  }, [protocols, supplements, reconItems, scheduledBuys, scheduled]);
-
-  // Force calendar refresh when data becomes available (Android fix)
-  useEffect(() => {
-    // If we have protocols or supplements but no scheduled data, force a refresh
     const hasData = (protocols?.length > 0 || supplements?.length > 0);
-    const hasScheduled = Object.keys(scheduled).length > 0;
-    
-    if (hasData && !hasScheduled) {
-      setCalendarBump(prev => prev + 1);
-      // Also trigger loadData directly
-      setTimeout(() => {
-        loadData();
-      }, 100);
+    if (hasData && !dataArrivalBumpRef.current) {
+      dataArrivalBumpRef.current = true;
+      setCalendarBump((prev) => (typeof prev === 'number' ? prev + 1 : Date.now()));
     }
-  }, [protocols?.length, supplements?.length, scheduled]);
+  }, [protocols?.length, supplements?.length]);
 
   // Task completion handler - unified with Dashboard
 
@@ -1119,6 +1100,15 @@ export default function Calendar() {
       updateCalendarNote(key, text);
   }
 
+  const handleDeleteNotes = () => {
+      if (isReadOnly) {
+        setShowUpgradeModal(true);
+        return;
+      }
+      if (!editingNotesFor) return;
+      updateCalendarNote(toKey(editingNotesFor), '');
+  }
+
   const handlePrev = () => {
     if (viewMode === 'week') {
       setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() - 7));
@@ -1230,8 +1220,10 @@ export default function Calendar() {
           open={!!editingNotesFor}
           onClose={() => setEditingNotesFor(null)}
           theme={theme}
+          date={editingNotesFor}
           notes={editingNotesFor ? getCalendarNoteText(calendarNotes, toKey(editingNotesFor)) : ''}
           onSave={handleSaveNotes}
+          onDelete={handleDeleteNotes}
       />
 
       {/* Calendar Quick Edit Modal */}

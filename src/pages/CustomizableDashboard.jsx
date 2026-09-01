@@ -101,7 +101,8 @@ export default function CustomizableDashboard() {
   const { theme } = useOutletContext();
   const navigate = useNavigate();
   const { isReadOnly } = useSubscriptionAccess();
-  const caps = useTierAccess();
+  const { caps: tierCaps } = useTierAccess();
+  const capsEnforced = tierCaps?.enforced ?? false;
   const { firebaseUser } = useFirebase();
   const { 
     scheduledBuys,
@@ -689,7 +690,7 @@ export default function CustomizableDashboard() {
     
     try {
       // Get today's scheduled tasks using the same logic as Calendar
-      const scheduledData = calculateScheduledTasksForDate(finalToday, protocols, supplements, reconItems, medications, !!caps?.enforced);
+      const scheduledData = calculateScheduledTasksForDate(finalToday, protocols, supplements, reconItems, medications, capsEnforced);
       
       // Get the date key for today to check completion status
       const todayKey = toKey(finalToday);
@@ -816,7 +817,7 @@ export default function CustomizableDashboard() {
       console.error('Error stack:', error.stack);
       setTodaysTasks([]);
     }
-  }, [supplements, medications, protocols, reconItems, calendarBump, oneOffDoses]);
+  }, [supplements, medications, protocols, reconItems, calendarBump, oneOffDoses, capsEnforced]);
 
   // Gamification: streak + unlock celebration when all tasks for today are complete
   useEffect(() => {

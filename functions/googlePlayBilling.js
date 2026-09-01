@@ -217,23 +217,14 @@ function mapPurchaseToSubscription(verifiedPurchase, productId, options = {}) {
   const { purchaseType, data } = verifiedPurchase;
   const { userId, userEmail } = options;
 
-  // Determine plan details from product ID
+  // Determine plan details from product ID — both m. and com. prefixes accepted
   const planMapping = {
-    'com.thepepplanner.app.monthly': {
-      key: 'monthly',
-      name: 'Monthly',
-      interval: 'month',
-    },
-    'com.thepepplanner.app.annual': {
-      key: 'annual',
-      name: 'Annual',
-      interval: 'year',
-    },
-    'com.thepepplanner.app.lifetime': {
-      key: 'lifetime',
-      name: 'Lifetime Access',
-      interval: 'lifetime',
-    },
+    'm.thepepplanner.app.researchmonthly':    { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month'    },
+    'm.thepepplanner.app.researchannual':     { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year'     },
+    'm.thepepplanner.app.researchlifetime':   { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime' },
+    'com.thepepplanner.app.researchmonthly':  { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month'    },
+    'com.thepepplanner.app.researchannual':   { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year'     },
+    'com.thepepplanner.app.researchlifetime': { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime' },
   };
 
   const planDetails = planMapping[productId] || {
@@ -285,7 +276,7 @@ function mapPurchaseToSubscription(verifiedPurchase, productId, options = {}) {
 exports.verifyGooglePlayPurchase = onCall(
   {
     cors: true,
-    secrets: ['GOOGLE_PLAY_SERVICE_ACCOUNT_KEY', 'GOOGLE_PLAY_LICENSE_KEY', 'RESEND_API_KEY'],
+    secrets: ['GOOGLE_PLAY_LICENSE_KEY', 'RESEND_API_KEY'],
   },
   async (request) => {
     if (!request.auth) {

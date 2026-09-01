@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Pill, Check, PenTool, Beaker, Pipette, SprayCan, Hand, MoreVertical, Sun, Moon, SkipForward, CalendarArrowUp, Undo2, CalendarDays } from 'lucide-react';
+import { Pill, PenNib, TestTube, Syringe, SprayBottle, HandPalm } from '@phosphor-icons/react';
+import { Check, MoreVertical, Sun, Moon, SkipForward, CalendarArrowUp, Undo2, CalendarDays } from 'lucide-react';
 import InjectionSiteSelector from '../common/InjectionSiteSelector';
 import GlassmorphismDatePicker from '../common/GlassmorphismDatePicker';
 import { getChromeGradient } from '../../utils/recon';
@@ -10,45 +11,49 @@ import { OWNER_SELF, darkenHex, getBuddyCardTint } from '../../utils/buddies';
 import DoseStatusChip from '../common/DoseStatusChip';
 import { getDoseStatusChipInfo } from '../../utils/doseStatusChip';
 
-// Delivery icon component
-const DeliveryIcon = ({ task, theme, size = 14 }) => {
+// Delivery icon component — Phosphor duotone (matches Today's Research / TasksList)
+const DeliveryIcon = ({ task, theme, size = 16 }) => {
+  const iconProps = {
+    size,
+    weight: 'duotone',
+    color: theme.textLight,
+    className: 'flex-shrink-0',
+    'aria-hidden': true,
+  };
+
   if (task.type === 'peptide') {
-    // Check both deliveryMethod and delivery fields, with fallback
     const deliveryMethod = task.deliveryMethod || task.delivery || 'injection';
     const deliveryLower = String(deliveryMethod).toLowerCase();
-    
-    if (deliveryLower === 'pen') {
-      return <PenTool size={size} style={{ color: theme.textLight }} />;
+
+    if (task.penColor || deliveryLower === 'pen') {
+      return <PenNib {...iconProps} />;
     }
     if (deliveryLower === 'syringe' || deliveryLower === 'pipette' || deliveryLower === 'injection') {
-      return <Pipette size={size} style={{ color: theme.textLight }} />;
+      return <Syringe {...iconProps} />;
     }
     if (deliveryLower === 'nasal') {
-      return <SprayCan size={size} style={{ color: theme.textLight }} />;
+      return <SprayBottle {...iconProps} />;
     }
     if (deliveryLower === 'topical') {
-      return <Hand size={size} style={{ color: theme.textLight }} />;
+      return <HandPalm {...iconProps} />;
     }
-    // Default fallback for peptides (typically injected)
-    return <Pipette size={size} style={{ color: theme.textLight }} />;
+    return <Syringe {...iconProps} />;
   }
-  
+
   if (task.type === 'supplement') {
-    // Match TasksList logic: check both delivery and deliveryMethod
     const delivery = String(task.delivery || task.deliveryMethod || '').toLowerCase();
     if (delivery === 'injection' || delivery === 'syringe') {
-      return <Pipette size={size} style={{ color: theme.textLight }} />;
+      return <Syringe {...iconProps} />;
     }
     if (delivery === 'powder') {
-      return <Beaker size={size} style={{ color: theme.textLight }} />;
+      return <TestTube {...iconProps} />;
     }
     if (delivery === 'pill' || delivery === 'oral') {
-      return <Pill size={size} style={{ color: theme.textLight }} />;
+      return <Pill {...iconProps} />;
     }
-    // Default to pill for supplements
-    return <Pill size={size} style={{ color: theme.textLight }} />;
+    return <Pill {...iconProps} />;
   }
-  
+
   return null;
 };
 
@@ -77,8 +82,8 @@ const SIZE_STYLES = {
     name: 'text-xs sm:text-sm',
     dose: 'text-xs sm:text-sm',
     penType: 'text-[10px] sm:text-xs',
-    icon: 12,
-    menuIcon: 14,
+    icon: 16,
+    menuIcon: 18,
     checkbox: 'w-5 h-5 sm:w-6 sm:h-6',
     checkIcon: 14,
     checkIconSm: 'sm:w-[18px] sm:h-[18px]',
@@ -88,8 +93,8 @@ const SIZE_STYLES = {
     name: 'text-sm sm:text-base',
     dose: 'text-sm sm:text-base',
     penType: 'text-xs sm:text-sm',
-    icon: 14,
-    menuIcon: 16,
+    icon: 18,
+    menuIcon: 20,
     checkbox: 'w-6 h-6 sm:w-7 sm:h-7',
     checkIcon: 16,
     checkIconSm: 'sm:w-[20px] sm:h-[20px]',
@@ -99,8 +104,8 @@ const SIZE_STYLES = {
     name: 'text-base sm:text-lg',
     dose: 'text-sm sm:text-base',
     penType: 'text-xs sm:text-sm',
-    icon: 16,
-    menuIcon: 18,
+    icon: 20,
+    menuIcon: 22,
     checkbox: 'w-7 h-7',
     checkIcon: 18,
     checkIconSm: 'sm:w-[22px] sm:h-[22px]',

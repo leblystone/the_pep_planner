@@ -50,7 +50,7 @@ async function resolveUserTier(userId, baseTier, db) {
 }
 
 exports.adminManualAndroidGrant = onCall(
-  { cors: true },
+  { invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Authentication required');
     const callerEmail = request.auth.token.email;
@@ -143,3 +143,4 @@ exports.adminManualAndroidGrant = onCall(
     };
   }
 );
+

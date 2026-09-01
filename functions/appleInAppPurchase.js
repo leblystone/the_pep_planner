@@ -391,6 +391,22 @@ exports.appleWebhook = onRequest(
 
       if (!userRecord) {
         logger.warn(`⚠️ No user found for Apple originalTransactionId: ${originalTransactionId}`);
+        // Log to webhookFailures so admin can review and manually link the user
+        try {
+          const db = admin.firestore();
+          await db.collection('webhookFailures').add({
+            platform: 'apple',
+            notificationType,
+            subtype: subtype || null,
+            originalTransactionId: String(originalTransactionId),
+            productId: transactionInfo.productId || null,
+            reason: 'no_user_found',
+            rawPayload: JSON.stringify({ notificationType, subtype, originalTransactionId, productId: transactionInfo.productId }),
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } catch (logErr) {
+          logger.error('❌ Failed to log Apple webhook failure:', logErr.message);
+        }
         return response.status(200).json({ received: true });
       }
 

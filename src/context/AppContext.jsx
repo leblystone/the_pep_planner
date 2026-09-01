@@ -76,10 +76,16 @@ import {
     hasCalendarNotes
 } from '../utils/calendarNotesMigration';
 
-const AppContext = createContext();
+const AppContext = createContext(null);
 
 export function useAppContext() {
-    return useContext(AppContext);
+    const ctx = useContext(AppContext);
+    if (ctx == null) {
+        throw new Error(
+            'useAppContext must be used within AppProvider. If this appeared after hot reload in dev, hard-refresh (Ctrl+Shift+R).'
+        );
+    }
+    return ctx;
 }
 
 /**

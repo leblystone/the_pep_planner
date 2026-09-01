@@ -11,10 +11,14 @@ const emailService = require('./emailService');
 const FieldValue = admin.firestore.FieldValue;
 
 // Research+ product ID → tier/planKey map. Keep in sync with src/config/googlePlayBilling.js
+// Both prefixes accepted to handle old (com.) and current (m.) package naming
 const GP_RP_PRODUCT_MAP = {
-  'com.thepepplanner.app.researchmonthly':  { tier: 'research_plus', planKey: 'researchPlusMonthly' },
-  'm.thepepplanner.app.researchannual':     { tier: 'research_plus', planKey: 'researchPlusAnnual' },
-  'com.thepepplanner.app.researchlifetime': { tier: 'research_plus', planKey: 'researchPlusLifetime' },
+  'm.thepepplanner.app.researchmonthly':    { tier: 'research_plus', planKey: 'researchPlusMonthly',  interval: 'month' },
+  'm.thepepplanner.app.researchannual':     { tier: 'research_plus', planKey: 'researchPlusAnnual',   interval: 'year'  },
+  'm.thepepplanner.app.researchlifetime':   { tier: 'research_plus', planKey: 'researchPlusLifetime', interval: 'lifetime' },
+  'com.thepepplanner.app.researchmonthly':  { tier: 'research_plus', planKey: 'researchPlusMonthly',  interval: 'month' },
+  'com.thepepplanner.app.researchannual':   { tier: 'research_plus', planKey: 'researchPlusAnnual',   interval: 'year'  },
+  'com.thepepplanner.app.researchlifetime': { tier: 'research_plus', planKey: 'researchPlusLifetime', interval: 'lifetime' },
 };
 
 function getTierFromGooglePlayProductId(productId) {
@@ -154,7 +158,7 @@ exports.googlePlayWebhook = onRequest(
   {
     cors: true,
     invoker: 'public',
-    secrets: ['GOOGLE_PLAY_SERVICE_ACCOUNT_KEY', 'RESEND_API_KEY']
+    secrets: ['RESEND_API_KEY']
   },
   async (request, response) => {
     logger.info('📥 Received Google Play RTDN notification');
@@ -210,25 +214,48 @@ async function handleSubscriptionNotification(notification) {
   }
 
   const db = admin.firestore();
-  const userQuery = await db.collection('userSubscriptions')
+
+  // Primary lookup: find existing user with this token already saved
+  let userDoc = null;
+  const tokenQuery = await db.collection('userSubscriptions')
     .where('subscription.googlePlayPurchaseToken', '==', purchaseToken)
     .limit(1).get();
 
-  if (userQuery.empty) {
-    logger.warn(`⚠️ No user found with purchase token: ${purchaseToken}`);
+  if (!tokenQuery.empty) {
+    userDoc = tokenQuery.docs[0];
+  }
+
+  // Fallback: on first purchase the token isn't saved yet.
+  // Google Play includes obfuscatedExternalAccountId when the app sets it at purchase initiation.
+  // The app should pass the Firebase UID there — use it to find the user directly.
+  if (!userDoc && subscriptionDetails?.obfuscatedExternalAccountId) {
+    const uid = subscriptionDetails.obfuscatedExternalAccountId;
+    logger.info(`🔍 Token lookup empty — trying obfuscatedExternalAccountId: ${uid}`);
+    const byUidDoc = await db.collection('userSubscriptions').doc(uid).get();
+    if (byUidDoc.exists) {
+      userDoc = byUidDoc;
+      logger.info(`✅ Found user via obfuscatedExternalAccountId: ${uid}`);
+    }
+  }
+
+  // Last resort: save unmatched token for admin review so it isn't silently lost
+  if (!userDoc) {
+    logger.warn(`⚠️ No user found for purchase token: ${purchaseToken} (notificationType: ${notificationType})`);
     await db.collection('webhookFailures').add({
       source: 'google_play',
       error: `No user found for purchase token: ${purchaseToken}`,
       notificationType,
       subscriptionId,
+      purchaseToken,
+      obfuscatedExternalAccountId: subscriptionDetails?.obfuscatedExternalAccountId || null,
       timestamp: FieldValue.serverTimestamp(),
+      note: 'Token saved here for admin recovery. Use adminManualAndroidGrant to link to the correct user.',
     });
     return;
   }
 
-  const userDoc = userQuery.docs[0];
   const userId = userDoc.id;
-  const userEmail = userDoc.data().subscription?.userEmail;
+  const userEmail = userDoc.data().subscription?.userEmail || userDoc.data().email;
   logger.info(`👤 Found user: ${userId} (${userEmail})`);
 
   switch (notificationType) {
@@ -535,13 +562,22 @@ async function updateSubscriptionStatus(userId, status, details, db, opts = {}) 
     ? await resolveUserTier(userId, tierInfo.tier, db)
     : null;
 
+  // Always persist the purchase token and product ID so future syncs and RTDNs can find this user
+  const productId = details.productId || details.sku || null;
+  const purchaseToken = details.purchaseToken || details.linkedPurchaseToken || null;
+  const tierInfo2 = productId ? getTierFromGooglePlayProductId(productId) : null;
+  const interval = tierInfo2?.interval || (tierInfo?.interval) || null;
+
   const subscriptionData = {
     status,
     lastUpdated: FieldValue.serverTimestamp(),
     isAutoRenewing: details.autoRenewing === true,
     paymentProvider: 'google_play',
     ...(resolvedTier && { tier: resolvedTier, planKey: tierInfo.planKey }),
-    ...(clearStaleFields && { hasLifetimeAccess: false, interval: null, plan: null }),
+    ...(interval && { interval }),
+    ...(productId && { googlePlayProductId: productId }),
+    ...(purchaseToken && { googlePlayPurchaseToken: purchaseToken }),
+    ...(clearStaleFields && { hasLifetimeAccess: false, plan: null }),
     ...extraSubscription,
   };
 

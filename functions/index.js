@@ -784,6 +784,7 @@ exports.adminExtendTrialPeriod = onCall(
 exports.manualSyncSubscription = manualSyncSubscription.manualSyncSubscription;
 exports.adminRunSubscriptionReconciliation = subscriptionReconciliationAdmin.adminRunSubscriptionReconciliation;
 exports.getAdminSubscriptionReconciliationLog = subscriptionReconciliationAdmin.getAdminSubscriptionReconciliationLog;
+exports.scanAndFixSubscriptions = subscriptionReconciliationAdmin.scanAndFixSubscriptions;
 
 // User activity and communications (admin User Detail modal)
 exports.getUserActivityHistory = getUserActivityHistory.getUserActivityHistory;

@@ -30,6 +30,7 @@ export const adminPrimaryTabs = [
       { id: 'lifetime', label: 'Lifetime', path: `${ADMIN_BASE}/users/lifetime` },
       { id: 'annual', label: 'Annual', path: `${ADMIN_BASE}/users/annual` },
       { id: 'expired-trials', label: 'Expired Trials', path: `${ADMIN_BASE}/users/expired-trials` },
+      { id: 'sub-health', label: 'Subscription Health', path: `${ADMIN_BASE}/users/subscription-health` },
     ],
   },
   {
@@ -85,7 +86,7 @@ export const adminPrimaryTabs = [
       { id: 'version', label: 'Version', path: `${ADMIN_BASE}/settings/version` },
       { id: 'agreements', label: 'Legal', path: `${ADMIN_BASE}/settings/agreements` },
       { id: 'flags', label: '⚡ Kill Switches', path: `${ADMIN_BASE}/settings/flags` },
-      { id: 'subscriptions', label: 'Subscriptions', path: `${ADMIN_BASE}/settings/subscriptions` },
+      { id: 'subscriptions', label: 'Subscriptions', path: `${ADMIN_BASE}/users/subscription-health` },
     ],
   },
 ];
@@ -135,7 +136,8 @@ export const adminPaths = {
   settingsVersion: `${ADMIN_BASE}/settings/version`,
   settingsAgreements: `${ADMIN_BASE}/settings/agreements`,
   settingsFlags: `${ADMIN_BASE}/settings/flags`,
-  settingsSubscriptions: `${ADMIN_BASE}/settings/subscriptions`,
+  settingsSubscriptions: `${ADMIN_BASE}/users/subscription-health`,
+  usersSubscriptionHealth: `${ADMIN_BASE}/users/subscription-health`,
   aiInsights: `${ADMIN_BASE}/ai/insights`,
   aiCosts: `${ADMIN_BASE}/ai/costs`,
   settingsAiCosts: `${ADMIN_BASE}/ai/costs`, // legacy alias
