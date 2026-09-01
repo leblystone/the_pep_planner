@@ -14,18 +14,20 @@ import { COLLECTIONS } from '../config/collections';
 import {
   loginUser, addTicketMessage, updateTicketStatus, subscribeToTicketMessages,
 } from '../services/firebase';
+import {
+  isAdminPanelEmail,
+  isAdminMfaFresh,
+  markAdminMfaVerified,
+  clearAdminMfaSession,
+} from '../utils/adminSession';
+import { getTwoFactorSettings, verifyAndConsumeBackupCode } from '../services/twoFactorAuth';
+import { verifyTOTPCode, isValidCodeFormat } from '../utils/totp';
 
 // Standalone, mobile-first admin support inbox.
 // Kept intentionally lightweight: it does NOT mount AdminProvider (which eagerly
 // loads analytics, users, shop, lifetime, gifts, etc). It only reads open support
 // tickets so it opens fast on a phone. Replies go through the addTicketMessage
 // cloud function so the user still gets the normal in-app + email + push reply.
-
-const ADMIN_EMAILS = [
-  'lebrockmaldonado@gmail.com',
-  'contact@thepepplanner.com',
-  'thepepplanner@gmail.com',
-];
 
 const THEME = {
   bg: '#f5f5f0',
@@ -78,12 +80,16 @@ export default function MobileSupport() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // ---- Auth ----
-  const [authState, setAuthState] = useState('checking'); // checking | out | in
+  const [authState, setAuthState] = useState('checking'); // checking | out | in | mfa
   const [adminEmail, setAdminEmail] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
+  const [mfaPending, setMfaPending] = useState(null); // { uid, password }
+  const [mfaSecret, setMfaSecret] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [verifyingMfa, setVerifyingMfa] = useState(false);
 
   // ---- Data ----
   const [tickets, setTickets] = useState([]);
@@ -103,12 +109,34 @@ export default function MobileSupport() {
     setTimeout(() => setFlash(null), 2600);
   }, []);
 
-  // Keep admin auth in sync with Firebase Auth
+  // Keep admin auth in sync with Firebase Auth + 3-day MFA session
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
-      const ok = user && ADMIN_EMAILS.includes(user.email?.toLowerCase());
-      setAuthState(ok ? 'in' : 'out');
-      setAdminEmail(ok ? user.email.toLowerCase() : '');
+      const allowed = user && isAdminPanelEmail(user.email);
+      const fresh = allowed && isAdminMfaFresh(user.uid);
+      if (fresh) {
+        setAuthState('in');
+        setAdminEmail(user.email.toLowerCase());
+        setMfaPending(null);
+        return;
+      }
+      if (!user) {
+        clearAdminMfaSession();
+        setMfaPending(null);
+        setAuthState('out');
+        setAdminEmail('');
+        return;
+      }
+      // Signed in but MFA not fresh — don't wipe mid-authenticator step
+      if (!allowed) {
+        clearAdminMfaSession();
+        setMfaPending(null);
+        setAuthState('out');
+        setAdminEmail('');
+        return;
+      }
+      setAdminEmail('');
+      setAuthState((prev) => (prev === 'mfa' ? 'mfa' : 'out'));
     });
     return unsub;
   }, []);
@@ -118,15 +146,30 @@ export default function MobileSupport() {
     setLoginError('');
     const lower = email.trim().toLowerCase();
     if (!lower) { setLoginError('Please enter your email'); return; }
-    if (!ADMIN_EMAILS.includes(lower)) { setLoginError('This email is not authorized'); return; }
+    if (!isAdminPanelEmail(lower)) { setLoginError('This email is not authorized'); return; }
     setLoggingIn(true);
     try {
       await loginUser(lower, password);
-      if (!auth.currentUser || auth.currentUser.email?.toLowerCase() !== lower) {
+      const user = auth.currentUser;
+      if (!user || user.email?.toLowerCase() !== lower) {
         setLoginError('Authentication failed - please try again');
-      } else {
-        setPassword('');
+        return;
       }
+      const twoFactorSettings = await getTwoFactorSettings(user.uid, password);
+      if (
+        !twoFactorSettings?.enabled ||
+        twoFactorSettings.method !== 'authenticator' ||
+        !twoFactorSettings.secret
+      ) {
+        setLoginError('Enable authenticator under Account → Security first.');
+        clearAdminMfaSession();
+        return;
+      }
+      setMfaSecret(twoFactorSettings.secret);
+      setMfaPending({ uid: user.uid, password });
+      setMfaCode('');
+      setAuthState('mfa');
+      setPassword('');
     } catch (err) {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setLoginError('Incorrect email or password.');
@@ -138,7 +181,41 @@ export default function MobileSupport() {
     }
   };
 
+  const handleMfaVerify = async (e) => {
+    e.preventDefault();
+    if (!mfaPending) return;
+    setLoginError('');
+    setVerifyingMfa(true);
+    try {
+      const code = mfaCode.trim();
+      let isValid = false;
+      if (isValidCodeFormat(code) && mfaSecret) {
+        isValid = verifyTOTPCode(mfaSecret, code);
+      }
+      if (!isValid) {
+        isValid = await verifyAndConsumeBackupCode(mfaPending.uid, code, mfaPending.password);
+      }
+      if (!isValid) {
+        setLoginError('Invalid authenticator code.');
+        return;
+      }
+      markAdminMfaVerified(mfaPending.uid);
+      setAdminEmail(auth.currentUser?.email?.toLowerCase() || '');
+      setMfaPending(null);
+      setMfaSecret('');
+      setMfaCode('');
+      setAuthState('in');
+    } catch (err) {
+      setLoginError(err.message || 'Verification failed.');
+    } finally {
+      setVerifyingMfa(false);
+    }
+  };
+
   const handleLogout = () => {
+    clearAdminMfaSession();
+    setMfaPending(null);
+    setMfaSecret('');
     auth.signOut().catch(() => {});
   };
 
@@ -249,30 +326,70 @@ export default function MobileSupport() {
     );
   }
 
-  if (authState === 'out') {
+  if (authState === 'out' || authState === 'mfa') {
     return (
       <div style={{ ...styles.screen, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-        <form onSubmit={handleLogin} style={styles.loginCard}>
-          <div style={{ textAlign: 'center', marginBottom: 18 }}>
-            <ChatCircle size={40} weight="duotone" style={{ color: THEME.primary }} />
-            <h1 style={{ fontSize: 18, fontWeight: 800, color: THEME.text, margin: '10px 0 2px' }}>Support Inbox</h1>
-            <p style={{ fontSize: 13, color: THEME.textLight, margin: 0 }}>Admin sign in</p>
-          </div>
-          <input
-            type="email" inputMode="email" autoComplete="email"
-            value={email} onChange={(e) => setEmail(e.target.value)}
-            placeholder="Admin email" style={styles.input} required disabled={loggingIn}
-          />
-          <input
-            type="password" autoComplete="current-password"
-            value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password" style={styles.input} required disabled={loggingIn}
-          />
-          {loginError && <div style={styles.errorBox}>{loginError}</div>}
-          <button type="submit" disabled={loggingIn} style={styles.primaryBtn}>
-            {loggingIn ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
+        {authState === 'mfa' ? (
+          <form onSubmit={handleMfaVerify} style={styles.loginCard}>
+            <div style={{ textAlign: 'center', marginBottom: 18 }}>
+              <ChatCircle size={40} weight="duotone" style={{ color: THEME.primary }} />
+              <h1 style={{ fontSize: 18, fontWeight: 800, color: THEME.text, margin: '10px 0 2px' }}>Support Inbox</h1>
+              <p style={{ fontSize: 13, color: THEME.textLight, margin: 0 }}>Authenticator code</p>
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value.replace(/\s/g, '').slice(0, 12))}
+              placeholder="6-digit code"
+              style={{ ...styles.input, textAlign: 'center', letterSpacing: '0.2em', fontWeight: 700 }}
+              required
+              disabled={verifyingMfa}
+              autoFocus
+            />
+            {loginError && <div style={styles.errorBox}>{loginError}</div>}
+            <button type="submit" disabled={verifyingMfa || !mfaCode.trim()} style={styles.primaryBtn}>
+              {verifyingMfa ? 'Verifying…' : 'Verify & enter'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthState('out');
+                setMfaPending(null);
+                setMfaSecret('');
+                setMfaCode('');
+                setLoginError('');
+                clearAdminMfaSession();
+              }}
+              style={{ ...styles.primaryBtn, background: 'transparent', color: THEME.textLight, marginTop: 8, boxShadow: 'none' }}
+            >
+              Back
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleLogin} style={styles.loginCard}>
+            <div style={{ textAlign: 'center', marginBottom: 18 }}>
+              <ChatCircle size={40} weight="duotone" style={{ color: THEME.primary }} />
+              <h1 style={{ fontSize: 18, fontWeight: 800, color: THEME.text, margin: '10px 0 2px' }}>Support Inbox</h1>
+              <p style={{ fontSize: 13, color: THEME.textLight, margin: 0 }}>Password + authenticator · 3-day session</p>
+            </div>
+            <input
+              type="email" inputMode="email" autoComplete="email"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="Admin email" style={styles.input} required disabled={loggingIn}
+            />
+            <input
+              type="password" autoComplete="current-password"
+              value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password" style={styles.input} required disabled={loggingIn}
+            />
+            {loginError && <div style={styles.errorBox}>{loginError}</div>}
+            <button type="submit" disabled={loggingIn} style={styles.primaryBtn}>
+              {loggingIn ? 'Signing in…' : 'Continue'}
+            </button>
+          </form>
+        )}
       </div>
     );
   }

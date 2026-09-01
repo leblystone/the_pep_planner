@@ -33,12 +33,15 @@ import {
   getAdminThemeName,
   setAdminThemeName,
 } from '../../utils/adminThemeStorage';
-
-const ADMIN_EMAILS = [
-  'lebrockmaldonado@gmail.com',
-  'contact@thepepplanner.com',
-  'thepepplanner@gmail.com',
-];
+import {
+  isAdminPanelEmail,
+  isAdminMfaFresh,
+  markAdminMfaVerified,
+  clearAdminMfaSession,
+  adminMfaDaysRemaining,
+} from '../../utils/adminSession';
+import { getTwoFactorSettings, verifyAndConsumeBackupCode } from '../../services/twoFactorAuth';
+import { verifyTOTPCode, isValidCodeFormat } from '../../utils/totp';
 
 function AdminLayout() {
   const [adminThemeName, setAdminThemeNameState] = useState(getAdminThemeName);
@@ -56,28 +59,71 @@ function AdminLayout() {
   }, [adminThemeName]);
   const location = useLocation();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  /** After password: need authenticator code (uses existing account 2FA). */
+  const [mfaPending, setMfaPending] = useState(null); // { uid, email, password }
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaSecret, setMfaSecret] = useState('');
+  const [isVerifyingMfa, setIsVerifyingMfa] = useState(false);
 
-  // Keep admin auth in sync with Firebase Auth state.
-  // localStorage alone is not enough — if the Firebase session expires or the main
-  // app calls auth.signOut(), currentUser becomes null and all writes fail silently.
+  // Firebase session + 3-day MFA freshness. Password alone is not enough.
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
-      const isAdminUser = user && ADMIN_EMAILS.includes(user.email?.toLowerCase());
-      if (isAdminUser) {
-        localStorage.setItem('tpp_admin_auth', 'true');
+      const ok =
+        user &&
+        isAdminPanelEmail(user.email) &&
+        isAdminMfaFresh(user.uid);
+      if (ok) {
         setIsAuthenticated(true);
+        setMfaPending(null);
       } else {
-        // Firebase session gone — force re-login so uploads don't fail silently
-        localStorage.removeItem('tpp_admin_auth');
+        // Don't clear mfaPending mid-verify — only drop session flags
+        if (!user) {
+          clearAdminMfaSession();
+          setMfaPending(null);
+        } else if (!isAdminPanelEmail(user.email)) {
+          clearAdminMfaSession();
+          setMfaPending(null);
+        } else if (!isAdminMfaFresh(user.uid)) {
+          // Expired MFA while still signed in — require password + code again
+          clearAdminMfaSession();
+        }
         setIsAuthenticated(false);
       }
+      setAuthChecking(false);
     });
     return unsub;
   }, []);
+
+  // Re-check MFA expiry while the panel stays open (e.g. laptop left unlocked)
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    const tick = () => {
+      const user = auth.currentUser;
+      if (!user || !isAdminPanelEmail(user.email) || !isAdminMfaFresh(user.uid)) {
+        clearAdminMfaSession();
+        setIsAuthenticated(false);
+        setLoginError('Admin session expired — sign in again with your authenticator.');
+      }
+    };
+    const id = setInterval(tick, 60 * 1000);
+    return () => clearInterval(id);
+  }, [isAuthenticated]);
+
+  const finishAdminUnlock = (uid) => {
+    markAdminMfaVerified(uid);
+    setIsAuthenticated(true);
+    setMfaPending(null);
+    setMfaSecret('');
+    setMfaCode('');
+    setEmail('');
+    setPassword('');
+    setLoginError('');
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -86,25 +132,38 @@ function AdminLayout() {
     try {
       if (!email.trim()) {
         setLoginError('Please enter your email address');
-        setIsLoggingIn(false);
         return;
       }
       const emailLower = email.trim().toLowerCase();
-      if (!ADMIN_EMAILS.includes(emailLower)) {
+      if (!isAdminPanelEmail(emailLower)) {
         setLoginError('This email is not authorized for admin access');
-        setIsLoggingIn(false);
         return;
       }
       await loginUser(emailLower, password);
-      if (!auth.currentUser || auth.currentUser.email?.toLowerCase() !== emailLower) {
+      const user = auth.currentUser;
+      if (!user || user.email?.toLowerCase() !== emailLower) {
         setLoginError('Authentication failed - please try again');
-        setIsLoggingIn(false);
         return;
       }
-      setIsAuthenticated(true);
-      localStorage.setItem('tpp_admin_auth', 'true');
-      setEmail('');
-      setPassword('');
+
+      // Reuse the same authenticator already enabled on this account
+      const twoFactorSettings = await getTwoFactorSettings(user.uid, password);
+      if (
+        !twoFactorSettings?.enabled ||
+        twoFactorSettings.method !== 'authenticator' ||
+        !twoFactorSettings.secret
+      ) {
+        setLoginError(
+          'Authenticator is required for admin. Enable it under Account → Security on the main app, then try again.'
+        );
+        clearAdminMfaSession();
+        return;
+      }
+
+      setMfaSecret(twoFactorSettings.secret);
+      setMfaPending({ uid: user.uid, email: emailLower, password });
+      setMfaCode('');
+      setLoginError('');
     } catch (err) {
       console.error('Admin login error:', err);
       if (err.code === 'auth/user-not-found') {
@@ -121,9 +180,47 @@ function AdminLayout() {
     }
   };
 
+  const handleMfaVerify = async (e) => {
+    e.preventDefault();
+    if (!mfaPending) return;
+    setLoginError('');
+    setIsVerifyingMfa(true);
+    try {
+      const code = mfaCode.trim();
+      if (!code) {
+        setLoginError('Enter the 6-digit code from your authenticator app');
+        return;
+      }
+
+      let isValid = false;
+      if (isValidCodeFormat(code) && mfaSecret) {
+        isValid = verifyTOTPCode(mfaSecret, code);
+      }
+      if (!isValid) {
+        isValid = await verifyAndConsumeBackupCode(
+          mfaPending.uid,
+          code,
+          mfaPending.password
+        );
+      }
+      if (!isValid) {
+        setLoginError('Invalid authenticator code. Try again.');
+        return;
+      }
+      finishAdminUnlock(mfaPending.uid);
+    } catch (err) {
+      console.error('Admin MFA error:', err);
+      setLoginError(err.message || 'Verification failed. Please try again.');
+    } finally {
+      setIsVerifyingMfa(false);
+    }
+  };
+
   const handleLogout = () => {
     setIsAuthenticated(false);
-    localStorage.removeItem('tpp_admin_auth');
+    setMfaPending(null);
+    setMfaSecret('');
+    clearAdminMfaSession();
     sessionStorage.clear();
     auth.signOut().catch(() => {});
     window.location.href = ADMIN_BASE;
@@ -136,6 +233,16 @@ function AdminLayout() {
   const TimeIcon = isMorning ? Coffee : isEvening ? Wine : Sparkle;
   const timeMessage = isMorning ? 'Good morning' : isEvening ? 'Good evening' : 'Good afternoon';
   const timeColor = theme.primary;
+
+  if (authChecking) {
+    return (
+      <IconContext.Provider value={ADMIN_ICON_CONTEXT}>
+        <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: theme.background }}>
+          <CircleNotch className="animate-spin" size={28} style={{ color: theme.primary }} />
+        </div>
+      </IconContext.Provider>
+    );
+  }
 
   if (!isAuthenticated) {
     return (
@@ -169,72 +276,142 @@ function AdminLayout() {
               Admin Panel
             </p>
             <p className="text-xs mt-2" style={{ color: theme.textLight }}>
-              Enter your email and Firebase account password to access the admin panel
+              {mfaPending
+                ? 'Enter the code from your authenticator app (same as account login)'
+                : 'Password + authenticator. Session lasts 3 days.'}
             </p>
           </div>
-          <form onSubmit={handleLogin} className="space-y-2">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Admin email"
-              className="w-full p-4 rounded-lg border mb-3 focus:outline-none focus:ring-2"
-              style={{
-                borderColor: loginError && !email.trim() ? theme.error : theme.border,
-                backgroundColor: theme.cardBackground,
-                color: theme.text,
-              }}
-              required
-              disabled={isLoggingIn}
-              autoComplete="email"
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Firebase account password"
-              className="w-full p-4 rounded-lg border focus:outline-none focus:ring-2"
-              style={{
-                borderColor: loginError && email.trim() ? theme.error : theme.border,
-                backgroundColor: theme.cardBackground,
-                color: theme.text,
-              }}
-              required
-              disabled={isLoggingIn}
-              autoComplete="current-password"
-            />
-            {loginError && (
-              <div
-                className="px-4 py-3 rounded-lg text-sm"
+
+          {mfaPending ? (
+            <form onSubmit={handleMfaVerify} className="space-y-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\s/g, '').slice(0, 12))}
+                placeholder="6-digit code"
+                className="w-full p-4 rounded-lg border focus:outline-none focus:ring-2 tracking-[0.2em] text-center text-lg font-semibold"
                 style={{
-                  backgroundColor: theme.error + '15',
-                  color: theme.error,
-                  border: `1px solid ${theme.error}30`,
+                  borderColor: theme.border,
+                  backgroundColor: theme.cardBackground,
+                  color: theme.text,
+                }}
+                required
+                disabled={isVerifyingMfa}
+                autoFocus
+              />
+              {loginError && (
+                <div
+                  className="px-4 py-3 rounded-lg text-sm"
+                  style={{
+                    backgroundColor: theme.error + '15',
+                    color: theme.error,
+                    border: `1px solid ${theme.error}30`,
+                  }}
+                >
+                  {loginError}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={isVerifyingMfa || !mfaCode.trim()}
+                className="w-full p-4 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark} 100%)`,
+                  color: '#FFF',
+                  border: `1px solid ${theme.border}`,
                 }}
               >
-                {loginError}
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full p-4 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{
-                background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark} 100%)`,
-                color: '#FFF',
-                border: `1px solid ${theme.border}`,
-              }}
-            >
-              {isLoggingIn ? (
-                <>
-                  <CircleNotch className="animate-spin" size={22} />
-                  <span>Authenticating...</span>
-                </>
-              ) : (
-                'Enter Admin Panel'
+                {isVerifyingMfa ? (
+                  <>
+                    <CircleNotch className="animate-spin" size={22} />
+                    <span>Verifying…</span>
+                  </>
+                ) : (
+                  'Verify & enter'
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaPending(null);
+                  setMfaSecret('');
+                  setMfaCode('');
+                  setLoginError('');
+                  clearAdminMfaSession();
+                }}
+                className="w-full py-2 text-xs font-medium opacity-60 hover:opacity-100"
+                style={{ color: theme.text }}
+              >
+                Back to password
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-2">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Admin email"
+                className="w-full p-4 rounded-lg border mb-3 focus:outline-none focus:ring-2"
+                style={{
+                  borderColor: loginError && !email.trim() ? theme.error : theme.border,
+                  backgroundColor: theme.cardBackground,
+                  color: theme.text,
+                }}
+                required
+                disabled={isLoggingIn}
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Firebase account password"
+                className="w-full p-4 rounded-lg border focus:outline-none focus:ring-2"
+                style={{
+                  borderColor: loginError && email.trim() ? theme.error : theme.border,
+                  backgroundColor: theme.cardBackground,
+                  color: theme.text,
+                }}
+                required
+                disabled={isLoggingIn}
+                autoComplete="current-password"
+              />
+              {loginError && (
+                <div
+                  className="px-4 py-3 rounded-lg text-sm"
+                  style={{
+                    backgroundColor: theme.error + '15',
+                    color: theme.error,
+                    border: `1px solid ${theme.error}30`,
+                  }}
+                >
+                  {loginError}
+                </div>
               )}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full p-4 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark} 100%)`,
+                  color: '#FFF',
+                  border: `1px solid ${theme.border}`,
+                }}
+              >
+                {isLoggingIn ? (
+                  <>
+                    <CircleNotch className="animate-spin" size={22} />
+                    <span>Authenticating...</span>
+                  </>
+                ) : (
+                  'Continue'
+                )}
+              </button>
+            </form>
+          )}
         </div>
       </div>
       </IconContext.Provider>
@@ -292,7 +469,16 @@ function SecondaryTabContent({ tab, theme, isActive }) {
   return (
     <span className="flex items-center gap-2">
       {Icon && <Icon size={18} weight="duotone" style={{ color: iconColor, flexShrink: 0 }} />}
-      <span>{tab.label}</span>
+      <span
+        style={{
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          fontSize: '12px',
+          fontWeight: isActive ? 600 : 500,
+        }}
+      >
+        {tab.label}
+      </span>
     </span>
   );
 }
@@ -340,27 +526,36 @@ function AdminAuthenticatedLayout({
           boxShadow: theme.isDark ? '2px 0 12px rgba(0,0,0,0.35)' : '2px 0 8px rgba(0,0,0,0.04)',
         }}
       >
-        <div className="p-4 border-b flex-shrink-0 flex items-center justify-between" style={{ borderColor: theme.border }}>
-          <div className="flex items-center gap-2">
-            <img src="/tpp_logo.png" alt="The Pep Planner" className="w-9 h-9 object-contain" />
-            <div>
-              <h1 className="text-sm font-bold leading-tight" style={{ color: theme.text }}>
-                The Pep Planner
-              </h1>
-              <p className="text-[10px]" style={{ color: theme.textLight }}>
-                Admin
-              </p>
+        <div className="p-4 border-b flex-shrink-0" style={{ borderColor: theme.border }}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <img src="/tpp_logo.png" alt="The Pep Planner" className="w-9 h-9 object-contain flex-shrink-0" />
+              <div className="min-w-0">
+                <h1 className="text-sm font-bold leading-tight" style={{ color: theme.text }}>
+                  The Pep Planner
+                </h1>
+                <p className="text-[10px]" style={{ color: theme.textLight }}>
+                  Admin
+                </p>
+              </div>
             </div>
+            <button
+              type="button"
+              className="lg:hidden p-2 rounded-lg flex-shrink-0 transition-all duration-150 ease-out hover:scale-[1.02] active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+              style={{ color: theme.text, '--tw-ring-color': theme.primary }}
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close menu"
+            >
+              <X size={24} weight="regular" />
+            </button>
           </div>
-          <button
-            type="button"
-            className="lg:hidden p-2 rounded-lg transition-all duration-150 ease-out hover:scale-[1.02] active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-            style={{ color: theme.text, '--tw-ring-color': theme.primary }}
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Close menu"
+          <div
+            className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+            style={{ backgroundColor: timeColor + '18', color: timeColor }}
           >
-            <X size={24} weight="duotone" />
-          </button>
+            <TimeIcon size={18} weight="regular" />
+            <span>{timeMessage}</span>
+          </div>
         </div>
 
         <nav className="flex-1 py-3 px-2 space-y-0.5">
@@ -396,7 +591,16 @@ function AdminAuthenticatedLayout({
                 ) : (
                   <Icon size={22} weight="duotone" />
                 )}
-                <span>{tab.label}</span>
+                <span
+                  style={{
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    fontSize: '12px',
+                    fontWeight: isActive ? 600 : 500,
+                  }}
+                >
+                  {tab.label}
+                </span>
               </NavLink>
             );
           })}
@@ -406,16 +610,10 @@ function AdminAuthenticatedLayout({
           <div className="px-1 pb-1">
             <AdminThemeToggle theme={theme} themeName={themeName} onThemeChange={onThemeChange} />
           </div>
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
-            style={{ backgroundColor: timeColor + '18', color: timeColor }}
-          >
-            <TimeIcon size={18} weight="duotone" />
-            <span>{timeMessage}</span>
-          </div>
           <button
             type="button"
             onClick={handleLogout}
+            title={`Admin MFA session · ~${adminMfaDaysRemaining()} day(s) left`}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ease-out hover:scale-[1.02] active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
             style={{
               backgroundColor: theme.error + '15',
@@ -450,7 +648,7 @@ function AdminAuthenticatedLayout({
             onClick={() => setSidebarOpen(true)}
             aria-label="Open menu"
           >
-            <List size={24} weight="duotone" />
+            <List size={24} weight="regular" />
           </button>
           {secondaryTabs.length > 0 ? (
             <div className="flex items-center gap-6 py-2 min-w-max flex-1 overflow-x-auto">
@@ -512,7 +710,7 @@ function AdminAuthenticatedLayout({
           }`}
         >
           {fullBleed ? (
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden w-full">
               <Suspense fallback={<PageLoader theme={theme} />}>
                 <Outlet context={{ theme, setTopbarAction, setFullBleed }} />
               </Suspense>
