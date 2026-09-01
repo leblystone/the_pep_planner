@@ -5629,6 +5629,7 @@ exports.onSupportTicketUserMessageAdminAlert = onDocumentCreated(
         ticketNumber: ticket.ticketNumber || '',
         subject: ticket.subject || '',
         preview: messageData.message || messageData.text || '',
+        ticketType: ticket.type || '',
         kind,
       });
     } catch (error) {

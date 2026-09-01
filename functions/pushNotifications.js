@@ -497,8 +497,8 @@ const DEFAULT_TEMPLATES = {
     actionUrl: "/app/stockpile"
   },
   supportTicketReply: {
-    title: "💬 Support has responded!",
-    body: "You have a new reply on your support request{subjectSuffix}. Tap to open the conversation.",
+    title: "Pep Support💬",
+    body: "New reply from the Pep Planner team! 🥼",
     actionUrl: "/app/support"
   },
   inactiveUser: {
@@ -599,6 +599,7 @@ async function sendAdminSupportTicketAlertPush({
   ticketNumber = '',
   subject = '',
   preview = '',
+  ticketType = '',
   kind = 'new', // 'new' | 'reply'
 } = {}) {
   if (!ticketId) {
@@ -621,9 +622,20 @@ async function sendAdminSupportTicketAlertPush({
     const path = `/admin-support?ticketId=${encodeURIComponent(ticketId)}`;
     const url = `https://thepepplanner.com${path}`;
     const numberLabel = ticketNumber ? ` ${ticketNumber}` : '';
-    const title = kind === 'reply'
-      ? `💬 Ticket reply${numberLabel}`
-      : `🎫 New ticket${numberLabel}`;
+
+    let title;
+    if (kind === 'reply') {
+      title = `💬 Ticket reply${numberLabel}`;
+    } else {
+      const type = String(ticketType || '').toLowerCase();
+      if (type === 'bug') {
+        title = `🐛 New Bug Alert${numberLabel}`;
+      } else if (type === 'suggestion' || type === 'feature' || type === 'feedback') {
+        title = `💡 New Feature Request${numberLabel}`;
+      } else {
+        title = `🎫 New Support Ticket${numberLabel}`;
+      }
+    }
     const body = String(preview || subject || 'Open support inbox to reply').slice(0, 140);
 
     const result = await sendPushNotification(userId, title, body, {
