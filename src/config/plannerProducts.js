@@ -172,8 +172,8 @@ export async function saveShopProduct(data, existingId = null) {
     sku: data.sku || '',
     slug: data.slug || generateSlug(data.name),
     platformIds: {
-      etsy: data.platformIds?.etsy || '',
-      tiktok: data.platformIds?.tiktok || '',
+      etsy: String(data.platformIds?.etsy || '').trim(),
+      tiktok: String(data.platformIds?.tiktok || '').trim(),
     },
     relatedProductIds: Array.isArray(data.relatedProductIds) ? data.relatedProductIds : [],
     restockThreshold: Number(data.restockThreshold) || 5,

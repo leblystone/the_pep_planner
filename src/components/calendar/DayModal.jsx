@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { toKey } from './MonthGrid'
-import { User } from '@phosphor-icons/react'
-import { Pill, Edit, PenTool, Beaker, Target, CheckCircle, Check, ShoppingCart, Pipette, ChevronDown, ChevronUp, Calendar, Building, MapPin, Users, DollarSign, FileText, Star, HeartPulse, X, Sun, Moon, PenLine, Timer } from 'lucide-react'
+import { Person, Syringe, FileText as PhFileText, Heartbeat, Timer as PhTimer, Sun, Moon, PlusSquare } from '@phosphor-icons/react'
+import { Pill, PenTool, Beaker, Target, CheckCircle, Check, ShoppingCart, Pipette, ChevronDown, ChevronUp, Calendar, Building, MapPin, Users, DollarSign, FileText, Star, HeartPulse, X, PenLine } from 'lucide-react'
 import { isTaskCompleted, generateTaskId, toggleTaskCompletion } from '../../utils/taskCompletion'
 import TaskDisplay from './TaskDisplay'
 import { getChromeGradient, isColorDark } from '../../utils/recon'
@@ -15,6 +15,7 @@ import Modal from '../common/Modal'
 import { getCalendarNoteText, hasCalendarNotes as hasCalendarNotesUtil } from '../../utils/calendarNotesMigration'
 import { getSideEffectsForDate } from '../../utils/sideEffectsLog'
 import { getProtocolAccentHex, hexToRgba } from '../../utils/protocolColors'
+import { getWashoutPeriodProgress, getHalfLifeRemainingPct } from '../../utils/washoutDisplay'
 import SideEffectsQuickSheet from '../sideeffects/SideEffectsQuickSheet'
 import InjectionHistoryModal from '../common/InjectionHistoryModal'
 // calculateScheduledTasksForDate is now used by Calendar.jsx directly (single source of truth)
@@ -286,6 +287,7 @@ function SlotContent({ scheduled, theme, date, timeSlot, onTaskToggle, onSlotMov
               theme={theme}
               date={date}
               timeSlot={timeSlot}
+              size="normal"
               onToggle={onTaskToggle}
               onSlotMove={onSlotMove}
               onSkipDose={onSkipDose}
@@ -310,6 +312,7 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
   const [selectedNote, setSelectedNote] = useState(null)
   const [showInjectionHistory, setShowInjectionHistory] = useState(false)
   const [showSideEffectSheet, setShowSideEffectSheet] = useState(false)
+  const [editingSideEffect, setEditingSideEffect] = useState(null)
   const [daySideEffectsState, setDaySideEffectsState] = useState([])
 
   /** Darker sage accent for Side Effects card (distinct from Notes primary, not alarm red). */
@@ -395,6 +398,17 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
 
   const daySideEffects = daySideEffectsState
   const activeProtocols = (ctxProtocols || []).filter(p => p.active !== false)
+
+  const openSideEffectSheet = (entry = null) => {
+    setEditingSideEffect(entry)
+    setShowSideEffectSheet(true)
+  }
+
+  const closeSideEffectSheet = () => {
+    setShowSideEffectSheet(false)
+    setEditingSideEffect(null)
+    setDaySideEffectsState(getSideEffectsForDate(dayKey))
+  }
   
   // Calculate actual task completion status
   let totalTasks = 0
@@ -559,7 +573,7 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                   <button
                     type="button"
                     onClick={() => setShowInjectionHistory(true)}
-                    className="flex items-center gap-1.5 pl-3 pr-3 py-1.5 rounded-full text-xs font-bold transition-all"
+                    className="flex items-center gap-1.5 pl-3 pr-3 py-1.5 rounded-full text-xs font-semibold tracking-normal transition-all"
                     style={{
                       background: `linear-gradient(135deg, ${theme.primary}e0, ${theme.primary})`,
                       color: theme.textOnPrimary || '#fff',
@@ -567,7 +581,7 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                     }}
                     title="Injection site history (this day)"
                   >
-                    <User size={13} weight="bold" className="flex-shrink-0" aria-hidden />
+                    <Person size={20} weight="duotone" color={theme.textOnPrimary || '#fff'} className="flex-shrink-0" aria-hidden />
                     <span>Site history</span>
                   </button>
                 )}
@@ -583,7 +597,7 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                     }}
                     title="Log one-off dose"
                   >
-                    <Pipette size={13} className="flex-shrink-0" aria-hidden />
+                    <Syringe size={20} weight="duotone" color={theme.primary} className="flex-shrink-0" aria-hidden />
                     <span>One-off</span>
                   </button>
                 )}
@@ -604,9 +618,15 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
             {/* AM Section */}
             <div>
               <div className="flex items-center justify-between mb-0.5 px-1">
-                <div className="flex items-center gap-1.5">
-                  <Sun size={12} style={{ color: theme.isDark ? 'rgba(160, 180, 153, 0.6)' : theme.primary }} />
-                  <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: theme.textLight }}>Morning</span>
+                <div className="flex items-center gap-2">
+                  <Sun
+                    size={18}
+                    weight="duotone"
+                    color={theme.isDark ? 'rgba(160, 180, 153, 0.6)' : theme.primary}
+                    className="flex-shrink-0"
+                    aria-hidden
+                  />
+                  <span className="text-xs sm:text-sm font-semibold uppercase tracking-widest" style={{ color: theme.textLight }}>Morning</span>
                 </div>
                 {dayScheduled?.bySlot?.AM && (dayScheduled.bySlot.AM.peptides?.length > 0 || dayScheduled.bySlot.AM.supplements?.length > 0) && (
                   <MarkAllButton
@@ -642,9 +662,15 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
             {/* PM Section */}
             <div>
               <div className="flex items-center justify-between mb-0.5 px-1">
-                <div className="flex items-center gap-1.5">
-                  <Moon size={12} style={{ color: theme.isDark ? 'rgba(160, 180, 153, 0.85)' : theme.primaryDark }} />
-                  <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: theme.textLight }}>Evening</span>
+                <div className="flex items-center gap-2">
+                  <Moon
+                    size={18}
+                    weight="duotone"
+                    color={theme.isDark ? 'rgba(160, 180, 153, 0.85)' : (theme.primaryDark || theme.primary)}
+                    className="flex-shrink-0"
+                    aria-hidden
+                  />
+                  <span className="text-xs sm:text-sm font-semibold uppercase tracking-widest" style={{ color: theme.textLight }}>Evening</span>
                 </div>
                 {dayScheduled?.bySlot?.PM && (dayScheduled.bySlot.PM.peptides?.length > 0 || dayScheduled.bySlot.PM.supplements?.length > 0) && (
                   <MarkAllButton
@@ -760,40 +786,34 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
               >
                 {/* Header */}
                 <div
-                  className="flex items-center justify-between gap-1.5 px-2.5 py-2"
+                  className="flex items-center justify-between gap-2 px-3 py-3"
                   style={{ borderBottom: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.07)' : `${theme.primary}18`}` }}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div
-                      className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center"
-                      style={{ background: theme.isDark ? `${theme.primary}22` : `${theme.primary}18` }}
-                    >
-                      <FileText size={13} style={{ color: theme.primary }} strokeWidth={2} />
-                    </div>
-                    <p className="text-xs font-bold truncate" style={{ color: theme.text }}>Notes</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <PhFileText size={22} weight="duotone" color={theme.primary} className="flex-shrink-0" aria-hidden />
+                    <p className="text-base sm:text-lg font-bold truncate" style={{ color: theme.text }}>Research Notes</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => onNotesClick(date)}
-                    className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-lg transition-all"
-                    style={{ color: '#fff', backgroundColor: theme.primary, boxShadow: `0 1px 4px ${theme.primary}50` }}
+                    className="flex-shrink-0 p-0.5 rounded-md transition-all hover:opacity-80 active:opacity-70 touch-manipulation"
                     title={dayNotesText ? 'Edit note' : 'Add note'}
                   >
-                    <Edit size={11} strokeWidth={2.5} />
+                    <PlusSquare size={26} weight="duotone" color={theme.primary} aria-hidden />
                   </button>
                 </div>
                 {/* Body */}
                 <button
                   type="button"
                   onClick={() => onNotesClick(date)}
-                  className="flex-1 w-full text-left px-2.5 py-2.5 transition-all hover:opacity-90 cursor-pointer"
+                  className="flex-1 w-full text-left px-3 py-3 transition-all hover:opacity-90 cursor-pointer"
                 >
                   {dayNotesText ? (
-                    <p className="text-[11px] leading-relaxed line-clamp-4" style={{ color: theme.text }}>{dayNotesText}</p>
+                    <p className="text-xs sm:text-sm leading-relaxed line-clamp-4" style={{ color: theme.text }}>{dayNotesText}</p>
                   ) : (
                     <div className="flex flex-col items-center gap-1.5 py-2">
-                      <PenLine size={16} style={{ color: `${theme.primary}70` }} strokeWidth={2} />
-                      <p className="text-[10px] text-center leading-snug" style={{ color: theme.textLight }}>Nothing yet — tap to add</p>
+                      <PenLine size={18} style={{ color: `${theme.primary}70` }} strokeWidth={2} />
+                      <p className="text-xs text-center leading-snug" style={{ color: theme.textLight }}>Nothing yet — tap to add</p>
                     </div>
                   )}
                 </button>
@@ -814,56 +834,56 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
               >
                 {/* Header */}
                 <div
-                  className="flex items-center justify-between gap-1.5 px-2.5 py-2"
+                  className="flex items-center justify-between gap-2 px-3 py-3"
                   style={{ borderBottom: `1px solid ${theme.isDark ? `${sideFxAccent}28` : `${sideFxAccent}20`}` }}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div
-                      className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center"
-                      style={{ background: theme.isDark ? `${sideFxAccent}28` : `${sideFxAccent}20` }}
-                    >
-                      <HeartPulse size={13} style={{ color: sideFxAccent }} strokeWidth={2} />
-                    </div>
-                    <p className="text-xs font-bold truncate" style={{ color: theme.text }}>
-                      Side Effects {daySideEffects.length > 0 && <span className="font-normal text-[10px]">({daySideEffects.length})</span>}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Heartbeat size={22} weight="duotone" color={sideFxAccent} className="flex-shrink-0" aria-hidden />
+                    <p className="text-base sm:text-lg font-bold truncate" style={{ color: theme.text }}>
+                      Side Effects {daySideEffects.length > 0 && <span className="font-semibold text-sm sm:text-base">({daySideEffects.length})</span>}
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowSideEffectSheet(true)}
-                    className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-lg transition-all"
-                    style={{ color: '#fff', backgroundColor: sideFxAccent, boxShadow: `0 1px 4px ${sideFxAccent}66` }}
-                    title="Log side effect"
+                    onClick={() => openSideEffectSheet(null)}
+                    className="flex-shrink-0 p-0.5 rounded-md transition-all hover:opacity-80 active:opacity-70 touch-manipulation"
+                    title="Add side effect"
                   >
-                    <Edit size={11} strokeWidth={2.5} />
+                    <PlusSquare size={26} weight="duotone" color={sideFxAccent} aria-hidden />
                   </button>
                 </div>
                 {/* Body */}
-                <div className="flex-1 px-2.5 py-2.5">
+                <div className="flex-1 px-3 py-3">
                   {daySideEffects.length > 0 ? (
                     <div className="space-y-1">
                       {daySideEffects.slice(0, 3).map((e) => {
                         const sevColor = e.severity === 'severe' ? '#ef4444' : e.severity === 'moderate' ? '#f59e0b' : '#22c55e';
                         return (
-                          <div key={e.id} className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-medium flex-1 truncate" style={{ color: theme.text }}>{e.label || e.effect}</span>
+                          <button
+                            type="button"
+                            key={e.id}
+                            onClick={() => openSideEffectSheet(e)}
+                            className="flex items-center gap-1.5 w-full text-left rounded-lg px-1 py-1.5 -mx-1 transition-all hover:opacity-80 active:opacity-70 touch-manipulation cursor-pointer"
+                            title="Edit side effect"
+                          >
+                            <span className="text-xs sm:text-sm font-medium flex-1 truncate" style={{ color: theme.text }}>{e.label || e.effect}</span>
                             {e.severity && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
                                 style={{ backgroundColor: `${sevColor}20`, color: sevColor }}>
                                 {e.severity}
                               </span>
                             )}
-                          </div>
+                          </button>
                         );
                       })}
                       {daySideEffects.length > 3 && (
-                        <p className="text-[10px]" style={{ color: theme.textLight }}>+{daySideEffects.length - 3} more</p>
+                        <p className="text-xs" style={{ color: theme.textLight }}>+{daySideEffects.length - 3} more</p>
                       )}
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-1.5 py-2">
-                      <HeartPulse size={16} style={{ color: `${sideFxAccent}55` }} strokeWidth={2} />
-                      <p className="text-[10px] text-center leading-snug px-0.5 max-w-[9rem] mx-auto" style={{ color: theme.textLight }}>
+                      <HeartPulse size={18} style={{ color: `${sideFxAccent}55` }} strokeWidth={2} />
+                      <p className="text-xs text-center leading-snug px-0.5 max-w-[9rem] mx-auto" style={{ color: theme.textLight }}>
                         Side-effect radar: all quiet — tap if anything pings.
                       </p>
                     </div>
@@ -1115,20 +1135,15 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                   className="flex items-center gap-2.5 px-3 py-2.5"
                   style={{ borderBottom: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(200,122,92,0.15)'}` }}
                 >
-                  <div
-                    className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
-                    style={{
-                      background: theme.isDark ? 'rgba(200,122,92,0.22)' : 'rgba(200,122,92,0.14)',
-                      boxShadow: '0 0 0 1px rgba(200,122,92,0.25)',
-                    }}
-                  >
-                    <Timer size={16} style={{ color: theme.isDark ? 'rgba(200,122,92,0.9)' : '#c87a5c' }} strokeWidth={2} />
-                  </div>
+                  <PhTimer
+                    size={22}
+                    weight="duotone"
+                    color={theme.isDark ? 'rgba(200,122,92,0.9)' : '#c87a5c'}
+                    className="flex-shrink-0"
+                    aria-hidden
+                  />
                   <div className="min-w-0">
                     <p className="text-sm font-bold leading-tight" style={{ color: theme.text }}>Washout</p>
-                    <p className="text-[10px] leading-tight mt-0.5" style={{ color: theme.textLight }}>
-                      Active clearance periods for this day
-                    </p>
                   </div>
                 </div>
                 <div className="px-3 py-3 grid grid-cols-3 gap-1.5">
@@ -1137,6 +1152,7 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                     const name = isObj ? w.name : w;
                     const hasHalfLife = isObj && w.halfLives && w.halfLives.length > 0;
                     const barColor = theme.isDark ? 'rgba(200,122,92,0.75)' : '#c87a5c';
+                    const { pct: periodPct, daysLeft } = isObj ? getWashoutPeriodProgress(w) : { pct: 0, daysLeft: 0 };
 
                     return (
                       <div
@@ -1157,28 +1173,25 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
                             </div>
                           )}
                         </div>
-                        {hasHalfLife && (
+                        {isObj && w.totalDays > 0 && (
                           <div className="px-1.5 pb-1.5 space-y-0.5">
-                            {w.halfLives.map((hl, hlIdx) => {
-                              const hlHours = hl.unit === 'days' ? hl.value * 24 : hl.value;
-                              const elapsedHours = w.dayIndex * 24;
-                              const remaining = Math.pow(0.5, elapsedHours / hlHours);
-                              const pct = Math.round(remaining * 100);
+                            <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(200,122,92,0.12)' }}>
+                              <div className="h-full rounded-full transition-all" style={{
+                                width: `${Math.max(periodPct > 0 ? 2 : 0, periodPct)}%`,
+                                background: `linear-gradient(90deg, ${barColor} 0%, ${barColor}80 60%, ${barColor}30 100%)`
+                              }} />
+                            </div>
+                            <div className="flex justify-between mt-0.5 text-[9px] leading-tight" style={{ color: theme.textLight }}>
+                              <span>{periodPct}%</span>
+                              <span>{daysLeft === 0 ? 'last day' : `${daysLeft}d left`}</span>
+                            </div>
+                            {hasHalfLife && w.halfLives.map((hl, hlIdx) => {
+                              const remainingPct = getHalfLifeRemainingPct(w.dayIndex, hl);
+                              if (remainingPct == null) return null;
                               return (
-                                <div key={hlIdx} className="min-w-0">
-                                  {w.halfLives.length > 1 && (
-                                    <div className="text-[9px] font-medium truncate" style={{ color: theme.textLight }} title={hl.name}>{hl.name}</div>
-                                  )}
-                                  <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(200,122,92,0.12)' }}>
-                                    <div className="h-full rounded-full transition-all" style={{
-                                      width: `${Math.max(2, pct)}%`,
-                                      background: `linear-gradient(90deg, ${barColor} 0%, ${barColor}80 60%, ${barColor}30 100%)`
-                                    }} />
-                                  </div>
-                                  <div className="flex justify-between mt-0.5 text-[9px] leading-tight" style={{ color: theme.textLight }}>
-                                    <span>~{pct}%</span>
-                                    <span>{hl.value}{hl.unit === 'days' ? 'd' : 'h'} t½</span>
-                                  </div>
+                                <div key={hlIdx} className="text-[9px] leading-tight truncate text-center" style={{ color: theme.textLight }} title={hl.name}>
+                                  {w.halfLives.length > 1 && <span className="font-medium">{hl.name}: </span>}
+                                  ~{remainingPct}% left · {hl.value}{hl.unit === 'days' ? 'd' : 'h'} t½
                                 </div>
                               );
                             })}
@@ -1295,14 +1308,12 @@ export default function DayModal({ date, entries, scheduled, theme, onClose, onN
 
       <SideEffectsQuickSheet
         open={showSideEffectSheet}
-        onClose={() => {
-          setShowSideEffectSheet(false);
-          setDaySideEffectsState(getSideEffectsForDate(dayKey));
-        }}
+        onClose={closeSideEffectSheet}
         theme={theme}
         protocol={null}
         protocols={activeProtocols}
         date={dayKey}
+        editEntry={editingSideEffect}
       />
     </>
   )

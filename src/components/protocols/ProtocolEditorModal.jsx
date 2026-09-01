@@ -47,38 +47,70 @@ function titleWithoutEmoji(text) {
     }
 }
 
+const EDITOR_SECTION_ORDER = ['info', 'peptides', 'duration', 'notes'];
+
 /**
  * Accordion card — defined at module level so React never remounts it on parent re-render,
  * which would steal focus from any focused child input.
  */
-function AccordionCard({ sectionKey, icon: Icon, title, subtitle, children, optional, expandedSections, toggleSection, theme }) {
+function AccordionCard({
+    sectionKey,
+    icon: Icon,
+    title,
+    subtitle,
+    children,
+    optional,
+    expandedSections,
+    toggleSection,
+    theme,
+    isComplete = false,
+    summary = '',
+    isCreate = false,
+    onNext,
+    isLastSection = false,
+}) {
     const isOpen = expandedSections.has(sectionKey);
     const optionalPillBg = theme.isDark ? theme.primary + '25' : theme.primary + '12';
     const optionalPillText = theme.primary;
+    const showSummary = !isOpen && isComplete && !!summary;
     return (
-        <div className="rounded-lg border" style={{ borderColor: theme.border, backgroundColor: theme.cardBackground }}>
+        <div
+            className="rounded-lg border"
+            style={{
+                borderColor: isComplete ? `${theme.primary}60` : theme.border,
+                backgroundColor: theme.cardBackground,
+            }}
+        >
             <button
                 type="button"
                 onClick={() => toggleSection(sectionKey)}
                 className="w-full p-3 flex items-center justify-between hover:opacity-80 transition-opacity"
             >
-                <div className="flex items-center gap-3">
-                    <Icon size={24} style={{ color: theme.primary }} />
-                    <div className="flex flex-col gap-0.5 text-left">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {isComplete && !isOpen ? (
+                        <Check size={24} weight="duotone" style={{ color: theme.primary }} className="flex-shrink-0" />
+                    ) : (
+                        <Icon size={24} style={{ color: theme.primary }} className="flex-shrink-0" />
+                    )}
+                    <div className="flex flex-col gap-0.5 text-left min-w-0">
                         <div className="flex items-center gap-2">
                             <h4 className="text-base font-semibold" style={{ color: theme.text }}>{title}</h4>
                             {optional && (
                                 <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full" style={{ color: optionalPillText, backgroundColor: optionalPillBg }}>opt</span>
                             )}
                         </div>
-                        {subtitle ? (
+                        {showSummary ? (
+                            <span className="text-[10px] font-medium truncate" style={{ color: theme.textLight }}>{summary}</span>
+                        ) : subtitle ? (
                             <span className="text-[10px] font-bold uppercase tracking-[0.15em] opacity-40" style={{ color: theme.text }}>{subtitle}</span>
                         ) : null}
                     </div>
                 </div>
-                {isOpen
-                    ? <CaretDown size={22} style={{ color: theme.textLight }} />
-                    : <CaretRight size={22} style={{ color: theme.textLight }} />}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    {isOpen
+                        ? <CaretDown size={22} style={{ color: theme.textLight }} />
+                        : <CaretRight size={22} style={{ color: theme.textLight }} />}
+                </div>
             </button>
             <div
                 className="grid transition-[grid-template-rows,opacity] duration-300 ease-out"
@@ -90,6 +122,24 @@ function AccordionCard({ sectionKey, icon: Icon, title, subtitle, children, opti
                 <div className="overflow-hidden min-h-0">
                 <div className="px-3 pb-3 pt-2 border-t" style={{ borderColor: theme.border }}>
                     {children}
+                    {isCreate && isOpen && !isLastSection && typeof onNext === 'function' && (
+                        <div className="mt-3 pt-3 border-t" style={{ borderColor: theme.border }}>
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onNext();
+                                }}
+                                className="w-full py-2.5 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all active:scale-[0.99]"
+                                style={{
+                                    backgroundColor: theme.primary,
+                                    color: theme.textOnPrimary || '#ffffff',
+                                }}
+                            >
+                                Next
+                            </button>
+                        </div>
+                    )}
                 </div>
                 </div>
             </div>
@@ -124,11 +174,74 @@ export default function ProtocolEditorModal({ open, onClose, onSave, onDelete, t
     const [expandedPeptides, setExpandedPeptides] = useState(new Set()); // Will be set in useEffect
     /** Which accordion sections are expanded. New protocols start with 'info' open. */
     const [expandedSections, setExpandedSections] = useState(new Set(['info']));
+    const isCreateMode = !protocol?.id;
     const toggleSection = (key) => setExpandedSections(prev => {
         const next = new Set(prev);
         next.has(key) ? next.delete(key) : next.add(key);
         return next;
     });
+    const advanceSection = useCallback((currentKey) => {
+        const idx = EDITOR_SECTION_ORDER.indexOf(currentKey);
+        if (idx < 0) return;
+        const nextKey = EDITOR_SECTION_ORDER[idx + 1];
+        setExpandedSections(() => {
+            const next = new Set();
+            if (nextKey) next.add(nextKey);
+            return next;
+        });
+    }, []);
+
+    const sectionComplete = useMemo(() => {
+        const peptides = form.peptides || [];
+        const namedWithDose = peptides.length > 0 && peptides.every((p) => {
+            const nameOk = !!(p.name || '').trim();
+            const amount = p.dosage?.amount ?? p.dose ?? p.titration?.[0]?.dose;
+            const doseOk = amount != null && String(amount).trim() !== '';
+            return nameOk && doseOk;
+        });
+        return {
+            info: !!(form.protocolName || '').trim(),
+            peptides: namedWithDose,
+            duration: true,
+            notes: true,
+        };
+    }, [form.protocolName, form.peptides]);
+
+    const sectionSummaries = useMemo(() => {
+        const name = titleWithoutEmoji((form.protocolName || '').trim());
+        const purpose = (form.purpose || '').trim();
+        const infoParts = [name, purpose].filter(Boolean);
+        const peptideNames = (form.peptides || [])
+            .map((p) => (p.name || '').trim())
+            .filter(Boolean);
+        let peptidesSummary = '';
+        if (peptideNames.length === 0) {
+            peptidesSummary = '';
+        } else if (peptideNames.length === 1) {
+            peptidesSummary = peptideNames[0];
+        } else {
+            peptidesSummary = `${peptideNames.length} peptides — ${peptideNames.join(', ')}`;
+        }
+        let durationSummary = 'Ongoing';
+        if (form.duration?.noEnd) {
+            durationSummary = 'Ongoing';
+        } else if (form.duration?.count) {
+            const unit = form.duration.unit || 'weeks';
+            durationSummary = `${form.duration.count} ${unit}`;
+        } else {
+            durationSummary = '(not set)';
+        }
+        const notesRaw = (form.notes || '').trim();
+        const notesSummary = notesRaw
+            ? (notesRaw.length > 40 ? `${notesRaw.slice(0, 40)}…` : notesRaw)
+            : '(none)';
+        return {
+            info: infoParts.join(' · '),
+            peptides: peptidesSummary,
+            duration: durationSummary,
+            notes: notesSummary,
+        };
+    }, [form.protocolName, form.purpose, form.peptides, form.duration, form.notes]);
 
     /** When true, purpose icon id follows keyword inference from Purpose / Goal. */
     const [purposeIconFollowsGoal, setPurposeIconFollowsGoal] = useState(true);
@@ -893,7 +1006,18 @@ export default function ProtocolEditorModal({ open, onClose, onSave, onDelete, t
         <div className="space-y-3 relative">
 
                 {/* ── 1. Protocol Info ─────────────────────────────────────────── */}
-                <AccordionCard sectionKey="info" icon={BookOpen} title="Protocol Info" expandedSections={expandedSections} toggleSection={toggleSection} theme={theme}>
+                <AccordionCard
+                    sectionKey="info"
+                    icon={BookOpen}
+                    title="Protocol Info"
+                    expandedSections={expandedSections}
+                    toggleSection={toggleSection}
+                    theme={theme}
+                    isComplete={sectionComplete.info}
+                    summary={sectionSummaries.info}
+                    isCreate={isCreateMode}
+                    onNext={() => advanceSection('info')}
+                >
                     <div className="space-y-3 pt-1">
                     <div className="relative" ref={protocolNameAnchorRef}>
                     <TextInput
@@ -962,7 +1086,19 @@ export default function ProtocolEditorModal({ open, onClose, onSave, onDelete, t
                 </AccordionCard>
 
                 {/* ── 2. Peptides ──────────────────────────────────────────────── */}
-                <AccordionCard sectionKey="peptides" icon={TestTube} title="Peptide(s)" subtitle="Dose, Delivery & Schedule" expandedSections={expandedSections} toggleSection={toggleSection} theme={theme}>
+                <AccordionCard
+                    sectionKey="peptides"
+                    icon={TestTube}
+                    title="Peptide(s)"
+                    subtitle="Dose, Delivery & Schedule"
+                    expandedSections={expandedSections}
+                    toggleSection={toggleSection}
+                    theme={theme}
+                    isComplete={sectionComplete.peptides}
+                    summary={sectionSummaries.peptides}
+                    isCreate={isCreateMode}
+                    onNext={() => advanceSection('peptides')}
+                >
                     <div className="space-y-2 pt-1">
 
                     {/* Protocol Type - Only show when 2+ peptides */}
@@ -1259,7 +1395,20 @@ export default function ProtocolEditorModal({ open, onClose, onSave, onDelete, t
                 </AccordionCard>
 
                 {/* ── 3. Duration ──────────────────────────────────────────────── */}
-                <AccordionCard sectionKey="duration" icon={CalendarDots} title="Duration" subtitle="Timeline & Washout" optional expandedSections={expandedSections} toggleSection={toggleSection} theme={theme}>
+                <AccordionCard
+                    sectionKey="duration"
+                    icon={CalendarDots}
+                    title="Duration"
+                    subtitle="Timeline & Washout"
+                    optional
+                    expandedSections={expandedSections}
+                    toggleSection={toggleSection}
+                    theme={theme}
+                    isComplete={sectionComplete.duration}
+                    summary={sectionSummaries.duration}
+                    isCreate={isCreateMode}
+                    onNext={() => advanceSection('duration')}
+                >
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div className="space-y-2">
                             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1452,7 +1601,20 @@ export default function ProtocolEditorModal({ open, onClose, onSave, onDelete, t
                     </AccordionCard>
 
                 {/* ── 4. Notes & Preview ───────────────────────────────────────── */}
-                <AccordionCard sectionKey="notes" icon={FileText} title="Notes & Preview" subtitle="Additional Details" optional expandedSections={expandedSections} toggleSection={toggleSection} theme={theme}>
+                <AccordionCard
+                    sectionKey="notes"
+                    icon={FileText}
+                    title="Notes & Preview"
+                    subtitle="Additional Details"
+                    optional
+                    expandedSections={expandedSections}
+                    toggleSection={toggleSection}
+                    theme={theme}
+                    isComplete={sectionComplete.notes}
+                    summary={sectionSummaries.notes}
+                    isCreate={isCreateMode}
+                    isLastSection
+                >
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start pt-1">
                         <div className="space-y-3">
                             <TextInput 

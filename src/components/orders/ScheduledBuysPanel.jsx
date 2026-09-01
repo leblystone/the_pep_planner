@@ -31,8 +31,8 @@ export default function ScheduledBuysPanel({ theme }) {
 
     const handleSave = (buy) => {
         if (buy.id) {
-            // Edit existing scheduled buy
-            const updatedBuy = prepareItemForSave({ ...buy });
+            // Edit existing scheduled buy — clear reconfirm flag when user edits
+            const updatedBuy = prepareItemForSave({ ...buy, needsReconfirm: false });
             setScheduledBuys(prev => prev.map(b => b.id === buy.id ? updatedBuy : b));
         } else {
             // Create new scheduled buy
@@ -122,6 +122,28 @@ export default function ScheduledBuysPanel({ theme }) {
                             <div className="flex items-center justify-between mb-1.5">
                                 <div className="font-semibold text-[13px]" style={{ color: theme.text }}>{buy.item}</div>
                                 <div className="flex items-center gap-1">
+                                    {buy.needsReconfirm && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const updated = prepareItemForSave({ ...buy, needsReconfirm: false });
+                                                setScheduledBuys(prev => prev.map(b => b.id === buy.id ? updated : b));
+                                                window.dispatchEvent(new CustomEvent('tpp:toast', {
+                                                    detail: { message: 'Scheduled buy confirmed', type: 'success' },
+                                                }));
+                                            }}
+                                            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                                            style={{
+                                                backgroundColor: 'rgba(245,158,11,0.14)',
+                                                color: '#f59e0b',
+                                                border: '1px solid rgba(245,158,11,0.35)',
+                                            }}
+                                            title="Still pending?"
+                                        >
+                                            Still pending?
+                                        </button>
+                                    )}
                                     <button onClick={(e) => { e.stopPropagation(); handleOpenModal(buy); }} className="p-1 hover:bg-black/5 rounded-md transition-colors" style={{ color: theme.textLight }}><Edit size={12} /></button>
                                     <button onClick={(e) => { e.stopPropagation(); if(window.confirm('Delete scheduled buy?')) handleDelete(buy.id); }} className="p-1 hover:bg-red-50 rounded-md transition-colors" style={{ color: theme.error || '#ef4444' }}><Trash2 size={12} /></button>
                                 </div>

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import BottomSheet from '../common/BottomSheet';
-import { logSideEffect } from '../../utils/sideEffectsLog';
+import { logSideEffect, updateSideEffect } from '../../utils/sideEffectsLog';
 import {
   SmileyWink, Syringe, WarningCircle, BatteryLow,
   Skull, Headphones, Balloon, MoonStars,
@@ -35,7 +35,7 @@ function toastSideEffectLogged(message) {
     }));
 }
 
-export default function SideEffectsQuickSheet({ open, onClose, theme, protocol = null, protocols = [], date = null, logSource = 'manual' }) {
+export default function SideEffectsQuickSheet({ open, onClose, theme, protocol = null, protocols = [], date = null, logSource = 'manual', editEntry = null }) {
     const [step, setStep]               = useState(STEP_PICK);
     const [selected, setSelected]       = useState(null);
     const [severity, setSeverity]       = useState(null);
@@ -47,10 +47,36 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
 
     const primary = theme?.primary || '#7F9E95';
 
-    // Sync linkedProtocol when sheet opens
+    // Sync form when sheet opens (new log vs edit)
     useEffect(() => {
-        if (open) setLinkedProtocol(protocol || null);
-    }, [open, protocol]);
+        if (!open) return;
+        if (editEntry) {
+            const knownEffect = EFFECTS.find((e) => e.id === editEntry.effect);
+            if (knownEffect && knownEffect.id !== 'other') {
+                setSelected(knownEffect);
+                setOtherText('');
+            } else {
+                setSelected(EFFECTS.find((e) => e.id === 'other'));
+                setOtherText(editEntry.label || editEntry.effect || '');
+            }
+            setSeverity(SEVERITY.find((s) => s.id === editEntry.severity) || null);
+            setNotes(editEntry.notes || '');
+            setStep(STEP_DETAIL);
+            setAnimDir('forward');
+            const linked = editEntry.protocolId
+                ? protocols.find((p) => p.id === editEntry.protocolId) || null
+                : (protocol || null);
+            setLinkedProtocol(linked);
+        } else {
+            setStep(STEP_PICK);
+            setSelected(null);
+            setSeverity(null);
+            setNotes('');
+            setOtherText('');
+            setAnimDir('forward');
+            setLinkedProtocol(protocol || null);
+        }
+    }, [open, editEntry, protocol, protocols]);
 
     const reset = useCallback(() => {
         setStep(STEP_PICK);
@@ -96,20 +122,31 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
 
     const handleSave = useCallback(() => {
         const effectLabel = selected?.id === 'other' ? (otherText.trim() || 'Other') : selected?.label;
-        logSideEffect({
+        const payload = {
             effect: selected?.id === 'other' ? (otherText.trim() || 'other') : selected?.id,
             label: effectLabel,
             severity: severity?.id || null,
             notes: notes.trim() || null,
             protocolId: linkedProtocol?.id || null,
             protocolName: linkedProtocol?.protocolName || null,
-            date: date || null,
-            source: logSource,
-        });
-        toastSideEffectLogged(`${effectLabel} saved. PiP will track patterns over time.`);
+        };
+        if (editEntry?.id) {
+            updateSideEffect(editEntry.id, {
+                ...payload,
+                date: editEntry.date || date || null,
+            });
+            toastSideEffectLogged(`${effectLabel} updated.`);
+        } else {
+            logSideEffect({
+                ...payload,
+                date: date || null,
+                source: logSource,
+            });
+            toastSideEffectLogged(`${effectLabel} saved. PiP will track patterns over time.`);
+        }
         reset();
         onClose?.();
-    }, [selected, severity, notes, otherText, linkedProtocol, date, logSource, reset, onClose]);
+    }, [selected, severity, notes, otherText, linkedProtocol, date, logSource, editEntry, reset, onClose]);
 
     useEffect(() => {
         if (contentRef.current) {
@@ -117,7 +154,9 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
         }
     }, [step]);
 
-    const stepTitle = step === STEP_DETAIL ? 'Severity & Notes' : 'Log a Side Effect';
+    const stepTitle = editEntry
+        ? (step === STEP_DETAIL ? 'Edit Side Effect' : 'Log a Side Effect')
+        : (step === STEP_DETAIL ? 'Severity & Notes' : 'Log a Side Effect');
 
     return (
         <BottomSheet
@@ -292,7 +331,7 @@ export default function SideEffectsQuickSheet({ open, onClose, theme, protocol =
                                 className="w-full rounded-xl py-3 text-sm font-bold text-white active:scale-[0.98] transition-all"
                                 style={{ backgroundColor: primary, boxShadow: `0 2px 8px ${primary}40` }}
                             >
-                                Save
+                                {editEntry ? 'Update' : 'Save'}
                             </button>
                         </div>
                     </div>

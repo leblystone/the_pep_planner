@@ -289,6 +289,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
     const [skippedPeptideDeliveryMethods, setSkippedPeptideDeliveryMethods] = useState({}); // Store delivery method info for skipped peptides
     const [penTypeDropdownOpen, setPenTypeDropdownOpen] = useState({}); // Track which peptide's dropdown is open
     const penTypeDropdownRefs = useRef({});
+    const hasInteractedRef = useRef(false);
 
     // Close dropdowns when clicking outside (supports both mouse and touch)
     useEffect(() => {
@@ -614,6 +615,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
     }, [open, protocol, storageKey]);
 
     const handleSelectVial = React.useCallback((peptideId, vialId) => {
+        hasInteractedRef.current = true;
         setLinkedData(prev => {
             const updated = {};
             Object.keys(prev).forEach(key => {
@@ -639,6 +641,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
     }, [stockpile, protocol]);
 
     const handleUnlinkPeptide = (peptideId) => {
+        hasInteractedRef.current = true;
         setLinkedData(prev => {
             const updated = {};
             Object.keys(prev).forEach(key => {
@@ -656,6 +659,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
     };
 
     const handleSkipPeptide = (peptideId) => {
+        hasInteractedRef.current = true;
         setLinkedData(prev => {
             const updated = {};
             Object.keys(prev).forEach(key => {
@@ -664,11 +668,10 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
             updated[peptideId] = { status: 'skipped' };
             return updated;
         });
-        // Auto-expand delivery section when peptides are skipped
-        setExpandedSections(prev => ({ ...prev, delivery: true, preview: false }));
     };
 
     const handleSaveNewAndLink = (peptideId, newItemData) => {
+        hasInteractedRef.current = true;
         const newItem = {
             id: `stock-${generateId()}`,
             ...newItemData,
@@ -728,6 +731,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
     };
 
     const handleSkipAllVials = () => {
+        hasInteractedRef.current = true;
         // Skip all peptides
         const updated = {};
         protocol.peptides.forEach((p, index) => {
@@ -735,7 +739,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
             updated[peptideId] = { status: 'skipped' };
         });
         setLinkedData(updated);
-        // Collapse linking, expand delivery
+        // Collapse linking, expand delivery (no vials to reconstitute)
         setExpandedSections({ preview: false, linking: false, recon: false, delivery: true });
     };
 
@@ -815,6 +819,30 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
             return true;
         });
     }, [linkedPeptides.length, reconComplete, reconSkipped, peptidesNeedingDelivery, skippedPeptideDeliveryMethods]);
+
+    // Focus-mode auto-advance: only after user interaction (not draft restore)
+    useEffect(() => {
+        if (!open) {
+            hasInteractedRef.current = false;
+        }
+    }, [open]);
+
+    useEffect(() => {
+        if (!hasInteractedRef.current || !linkingComplete) return;
+        if (linkedPeptides.length > 0) {
+            setExpandedSections(prev => ({ ...prev, linking: false, preview: false, recon: true }));
+        } else {
+            // All skipped — no recon step
+            setExpandedSections(prev => ({ ...prev, linking: false, preview: false, recon: false, delivery: true }));
+        }
+    }, [linkingComplete, linkedPeptides.length]);
+
+    useEffect(() => {
+        if (!hasInteractedRef.current) return;
+        if (reconComplete || reconSkipped) {
+            setExpandedSections(prev => ({ ...prev, recon: false, delivery: true }));
+        }
+    }, [reconComplete, reconSkipped]);
 
     // Validate protocol has required fields
     const protocolValid = useMemo(() => {
@@ -1251,6 +1279,7 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
                                 {/* Skip Button at Top */}
                                 <button
                                     onClick={() => {
+                                        hasInteractedRef.current = true;
                                         setReconComplete(false);
                                         setReconSkipped(true);
                                         setExpandedSections(prev => ({ ...prev, recon: false, delivery: true }));
@@ -1451,9 +1480,10 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
                                                     updatedLinkedData[peptideId] = { ...updatedLinkedData[peptideId], reconId: newReconId };
                                                 });
                                                 setLinkedData(updatedLinkedData);
+                                                hasInteractedRef.current = true;
                                                 setReconComplete(true);
                                                 setReconSkipped(false);
-                                                setExpandedSections(prev => ({ ...prev, recon: false, delivery: false }));
+                                                setExpandedSections(prev => ({ ...prev, recon: false, delivery: true }));
                                             }}
                                         />
                                     </div>

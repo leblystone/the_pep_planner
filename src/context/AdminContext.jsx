@@ -20,7 +20,7 @@ import {
   addTicketMessage,
   updateTicketStatus,
   subscribeToTicketMessages,
-  createAdminMessage,
+  replyToFeedbackViaTicket,
 } from '../services/firebase';
 import {
   calculateUserGrowth,
@@ -498,17 +498,11 @@ export function AdminProvider({ children }) {
     setLoading((prev) => ({ ...prev, submitting: true }));
     try {
       const text = responseText.trim();
-      // One-way "From the Team" for the user dashboard
-      await createAdminMessage(feedbackItem.userEmail, text);
-      // Persist on the feedback doc so admin DM frame can show the reply
-      await updateFeedback(feedbackItem.id, {
-        status: 'reviewed',
-        adminResponse: text,
-        responseDate: new Date(),
-      });
+      // Unified inbox: write into a linked support ticket (creates on first reply)
+      const result = await replyToFeedbackViaTicket(feedbackItem, text);
       await loadFeedback(true, { openOnly: feedbackOpenOnlyRef.current });
-      window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Admin message sent!', type: 'success' } }));
-      return true;
+      window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Reply sent to user inbox!', type: 'success' } }));
+      return result || true;
     } catch (err) {
       console.error('Send response failed:', err);
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Failed to send message', type: 'error' } }));

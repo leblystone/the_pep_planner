@@ -4,7 +4,7 @@ import {
   Funnel, TestTube, Bandaids, BoxingGlove,
   Biohazard, SprayBottle, FirstAidKit,
 } from '@phosphor-icons/react';
-import { Trash2, Zap, AlertTriangle } from 'lucide-react';
+import { Trash2, Zap, AlertTriangle, Check } from 'lucide-react';
 import { useIsSimpleMode } from '../../hooks/useIsSimpleMode';
 
 // Exported so AddSupplyModal shares the same config
@@ -29,19 +29,22 @@ const AUTO_TRACK_LABELS = {
   recon:   'Auto: Recon',
 };
 
-export default function SupplyCard({ supply, theme, onEdit, onDelete }) {
+export default function SupplyCard({ supply, theme, onEdit, onDelete, onConfirmLooksRight }) {
   const simpleMode = useIsSimpleMode();
   const qty = Number(supply.quantity) || 0;
   const threshold = Number(supply.lowThreshold) || 0;
   const isOut = qty <= 0;
   const isLow = !isOut && threshold > 0 && qty <= threshold;
+  const needsReconfirm = !!supply.needsReconfirm;
 
   const catCfg = SUPPLY_CATEGORY_CONFIG[supply.category] || SUPPLY_CATEGORY_CONFIG.custom;
   const { Icon, color: iconColor, label: catLabel } = catCfg;
   const autoLabel = !simpleMode && supply.autoTrack?.trigger ? AUTO_TRACK_LABELS[supply.autoTrack.trigger] : null;
 
   const quantityColor = isOut ? '#ef4444' : isLow ? '#f59e0b' : theme.primary;
-  const borderColor   = isOut
+  const borderColor   = needsReconfirm
+    ? 'rgba(245,158,11,0.45)'
+    : isOut
     ? 'rgba(239,68,68,0.35)'
     : isLow
     ? 'rgba(245,158,11,0.35)'
@@ -49,7 +52,7 @@ export default function SupplyCard({ supply, theme, onEdit, onDelete }) {
 
   return (
     <div
-      className={`rounded-xl p-4 ${isOut || isLow ? 'pb-8' : ''} relative overflow-hidden transition-all duration-200 cursor-pointer group hover:shadow-lg`}
+      className={`rounded-xl p-4 ${isOut || isLow || needsReconfirm ? 'pb-8' : ''} relative overflow-hidden transition-all duration-200 cursor-pointer group hover:shadow-lg`}
       style={{
         backgroundColor: theme.cardBackground,
         border: `1px solid ${borderColor}`,
@@ -60,16 +63,45 @@ export default function SupplyCard({ supply, theme, onEdit, onDelete }) {
       onClick={() => onEdit(supply)}
     >
       {/* Status badge */}
-      {(isOut || isLow) && (
+      {(isOut || isLow || needsReconfirm) && (
         <div
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
-          style={{
-            backgroundColor: isOut ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
-            color: isOut ? '#ef4444' : '#f59e0b',
-          }}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5"
         >
-          <AlertTriangle size={9} />
-          {isOut ? 'Empty' : 'Low'}
+          {needsReconfirm && typeof onConfirmLooksRight === 'function' && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onConfirmLooksRight(supply);
+              }}
+              className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: 'rgba(245,158,11,0.18)',
+                color: '#f59e0b',
+                border: '1px solid rgba(245,158,11,0.35)',
+              }}
+              title="Confirm quantity looks right"
+            >
+              <Check size={9} />
+              Looks Right
+            </button>
+          )}
+          {(isOut || isLow || (needsReconfirm && !onConfirmLooksRight)) && (
+            <div
+              className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: needsReconfirm && !isOut && !isLow
+                  ? 'rgba(245,158,11,0.12)'
+                  : isOut ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
+                color: needsReconfirm && !isOut && !isLow
+                  ? '#f59e0b'
+                  : isOut ? '#ef4444' : '#f59e0b',
+              }}
+            >
+              <AlertTriangle size={9} />
+              {needsReconfirm && !isOut && !isLow ? 'Confirm Qty' : isOut ? 'Empty' : 'Low'}
+            </div>
+          )}
         </div>
       )}
 

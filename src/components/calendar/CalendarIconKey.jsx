@@ -1,51 +1,88 @@
 import React from 'react';
-import { Pill, ShoppingCart, Target, CheckCircle, Beaker, Pipette, Droplet } from 'lucide-react';
-
-// Helper function to get supplement icon based on delivery method
-function getSupplementIcon(delivery, className = "h-4 w-4") {
-    switch (String(delivery || '').toLowerCase()) {
-        case 'injection': return <Pipette className={className} />;
-        case 'powder': return <Beaker className={className} />;
-        case 'pill':
-        case 'oral':
-        default: return <Pill className={className} />;
-    }
-}
+import { Pill, ShoppingCart, CheckCircle, Syringe, FileText, Heartbeat } from '@phosphor-icons/react';
+import { areWashoutIconsEnabled, areGroupBuysEnabled } from '../../utils/featureSettings';
 
 export default function CalendarIconKey({ theme, isVisible, onClose }) {
     if (!isVisible) return null;
 
+    const iconColor = theme.isDark ? '#a8b5a0' : '#73796D';
+    const sideFxAccent = theme.primaryDark || theme.primary || '#5F7F76';
+    const showWashoutIcons = areWashoutIconsEnabled();
+    const groupBuysEnabled = areGroupBuysEnabled();
+
     const iconItems = [
         {
-            icon: <CheckCircle className="h-4 w-4" style={{ color: '#4CAF50' }} />,
+            icon: (
+                <CheckCircle
+                    size={24}
+                    weight="fill"
+                    style={{ color: '#4CAF50' }}
+                />
+            ),
             label: 'All Research Completed',
-            description: 'Circle check mark shows all research for the day has been completed'
+            description: 'Research is done marked as completed for the day.'
         },
         {
-            icon: <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#73796D' }} />,
-            label: 'Research Incomplete',
-            description: 'Grey dot indicates there is still research to be completed'
+            icon: (
+                <div
+                    className="w-5 h-5 rounded-full"
+                    style={{ backgroundColor: '#73796D' }}
+                />
+            ),
+            label: 'Research Remaining',
+            description: 'Remaining research still exists.'
         },
         {
-            icon: getSupplementIcon('pill', 'h-4 w-4'),
-            label: 'Oral Supplements',
-            description: 'Pills, capsules, or oral medications'
+            icon: <Syringe size={24} weight="duotone" style={{ color: iconColor }} />,
+            label: 'Peptides & Research',
+            description: 'Scheduled Peptide & Research'
         },
         {
-            icon: getSupplementIcon('injection', 'h-4 w-4'),
-            label: 'Injections',
-            description: 'Injectable supplements or peptides'
+            icon: <Pill size={24} weight="duotone" style={{ color: iconColor }} />,
+            label: 'Supplements',
+            description: 'Scheduled supplements or medications'
+        },
+        ...(groupBuysEnabled
+            ? [{
+                icon: <ShoppingCart size={16} weight="duotone" style={{ color: iconColor }} />,
+                label: 'Orders & Buys',
+                description: 'Scheduled purchases or group buys'
+            }]
+            : []),
+        ...(showWashoutIcons
+            ? [{
+                icon: (
+                    <span className="inline-flex items-center justify-center w-6 h-6 text-xs rounded border border-gray-300 text-gray-800 bg-gray-200 font-bold leading-none">
+                        W
+                    </span>
+                ),
+                label: 'Washout Period',
+                description: 'Protocol washout or break period'
+            }]
+            : []),
+        {
+            icon: (
+                <span
+                    className="inline-flex items-center justify-center w-6 h-6 rounded border"
+                    style={{
+                        backgroundColor: theme.isDark ? `${sideFxAccent}28` : `${sideFxAccent}20`,
+                        borderColor: theme.isDark ? `${sideFxAccent}45` : `${sideFxAccent}35`,
+                    }}
+                >
+                    <Heartbeat size={14} weight="duotone" style={{ color: sideFxAccent }} />
+                </span>
+            ),
+            label: 'Side Effects',
+            description: 'Side effects were logged for this day'
         },
         {
-            icon: <ShoppingCart className="h-4 w-4" />,
-            label: 'Orders & Buys',
-            description: 'Scheduled purchases or group buys'
-        },
-        {
-            icon: <span className="text-xs font-bold px-1.5 py-0.5 rounded border-2 border-gray-600 text-white bg-gray-600">W</span>,
-            label: 'Washout Period',
-            description: 'Protocol washout or break period',
-            color: 'secondary'
+            icon: (
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded border border-gray-300 text-gray-800 bg-gray-200">
+                    <FileText size={14} weight="bold" />
+                </span>
+            ),
+            label: 'Day Note',
+            description: 'A note has been saved for this day'
         }
     ];
 
@@ -65,17 +102,14 @@ export default function CalendarIconKey({ theme, isVisible, onClose }) {
                             ✕
                         </button>
                     </div>
-                    <p className="text-sm mt-1" style={{ color: theme.textLight }}>
-                        Learn what each icon means in the monthly calendar view
-                    </p>
                 </div>
 
                 <div className="p-4 space-y-3">
                     {iconItems.map((item, index) => (
                         <div key={index} className="flex items-start gap-3 p-2 rounded-lg hover:opacity-90" style={{ backgroundColor: theme.background }}>
-                            <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded" style={{ 
+                            <div className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded" style={{ 
                                 backgroundColor: theme.primary + '10',
-                                color: item.color ? theme[item.color] : theme.primary 
+                                color: theme.primary 
                             }}>
                                 {item.icon}
                             </div>

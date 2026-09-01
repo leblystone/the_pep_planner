@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useOutletContext, Link } from 'react-router-dom';
-import { ArrowsClockwise, CircleNotch, CreditCard, DeviceMobile, AppleLogo, ListBullets } from '@phosphor-icons/react';
+import { ArrowsClockwise, CircleNotch, CreditCard, DeviceMobile, AppleLogo, ListBullets, ClockCounterClockwise } from '@phosphor-icons/react';
+import { collection, query, orderBy, limit as fsLimit, onSnapshot } from 'firebase/firestore';
+import { db } from '../../config/firebase';
 import {
   adminRunSubscriptionReconciliation,
   getAdminSubscriptionReconciliationLog,
@@ -63,6 +65,15 @@ export default function AdminSettingsSubscriptions() {
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(true);
   const [logFilterRunId, setLogFilterRunId] = useState(null);
+  const [runHistory, setRunHistory] = useState([]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'reconciliationRuns'), orderBy('ranAt', 'desc'), fsLimit(20));
+    const unsub = onSnapshot(q, (snap) => {
+      setRunHistory(snap.docs.map(d => ({ id: d.id, ...d.data(), ranAt: d.data().ranAt?.toDate?.()?.toISOString() })));
+    });
+    return unsub;
+  }, []);
 
   const loadLogs = useCallback(async (runId) => {
     setLogsLoading(true);
@@ -165,6 +176,50 @@ export default function AdminSettingsSubscriptions() {
         <p className="text-sm rounded-lg p-3" style={{ backgroundColor: theme.error + '15', color: theme.error }}>
           {error}
         </p>
+      )}
+
+      {/* Run History */}
+      {runHistory.length > 0 && (
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: theme.border, backgroundColor: theme.cardBackground }}>
+          <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: theme.border }}>
+            <ClockCounterClockwise size={16} style={{ color: theme.primary }} />
+            <span className="font-semibold text-sm" style={{ color: theme.text }}>Run History</span>
+            <span className="text-xs ml-auto" style={{ color: theme.textLight }}>Last {runHistory.length} runs</span>
+          </div>
+          <div className="overflow-x-auto max-h-52 overflow-y-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0" style={{ backgroundColor: theme.background }}>
+                <tr>
+                  <th className="px-3 py-2 font-semibold" style={{ color: theme.textLight }}>When</th>
+                  <th className="px-3 py-2 font-semibold" style={{ color: theme.textLight }}>Platforms</th>
+                  <th className="px-3 py-2 font-semibold" style={{ color: theme.textLight }}>Scanned</th>
+                  <th className="px-3 py-2 font-semibold" style={{ color: theme.textLight }}>Fixed</th>
+                  <th className="px-3 py-2 font-semibold" style={{ color: theme.textLight }}>Run by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runHistory.map((run) => {
+                  const scanned = Object.values(run.summary || {}).reduce((a, p) => a + (p.usersScanned || 0), 0);
+                  const fixed = run.totalLogged || 0;
+                  const hasError = Object.values(run.summary || {}).some(p => p.error);
+                  return (
+                    <tr key={run.id} className="border-t" style={{ borderColor: theme.border + '60' }}>
+                      <td className="px-3 py-2 whitespace-nowrap" style={{ color: theme.textLight }}>{formatWhen(run.ranAt)}</td>
+                      <td className="px-3 py-2" style={{ color: theme.text }}>{(run.platforms || []).join(', ')}</td>
+                      <td className="px-3 py-2" style={{ color: theme.text }}>{scanned}</td>
+                      <td className="px-3 py-2">
+                        <span style={{ color: fixed > 0 ? '#10B981' : hasError ? '#EF4444' : theme.textLight }}>
+                          {hasError ? 'error' : fixed > 0 ? `${fixed} fixed` : 'no drift'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap" style={{ color: theme.textLight }}>{run.runBy || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {result?.summary && (

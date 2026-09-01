@@ -53,6 +53,7 @@ export default function SharedHistoryCard({ item, theme }) {
     if (status === 'completed') return primary;
     if (status === 'ended_early') return textLight;
     if (status === 'rescheduled') return warning;
+    if (status === 'ended_reengagement') return primary;
     return textLight;
   };
 

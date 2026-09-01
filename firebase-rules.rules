@@ -46,8 +46,11 @@ service cloud.firestore {
     
     // Support tickets - users can create and read their own, admin can read/write all
     match /supportTickets/{ticketId} {
-      allow create: if request.auth != null
-        && request.resource.data.userEmail == request.auth.token.email;
+      // Users create their own tickets; admins may open/link tickets on behalf of users (CRM)
+      allow create: if request.auth != null && (
+        request.resource.data.userEmail == request.auth.token.email ||
+        isAdmin()
+      );
       allow read: if request.auth != null && (
         request.auth.token.email == resource.data.userEmail ||
         isAdmin()
@@ -270,6 +273,15 @@ service cloud.firestore {
       allow update, delete: if false; // Agreements are immutable once created
     }
     
+    // Notifications-enabled confirmation template — fired directly by the client (not via
+    // Cloud Function) the instant any user grants notification permission, including
+    // signed-out users on first app launch. Needs public read so that live edit picks up
+    // for everyone; content is just non-sensitive marketing copy (title/body text).
+    match /notificationTemplates/notificationsEnabledConfirmation {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // Email templates - admin can manage. Cloud Functions use the Admin SDK (bypasses rules),
     // and the client only reads these from the admin panel — no public read needed.
     // FCM push templates — admin edits in Push Notifications panel; Functions read via Admin SDK
@@ -375,6 +387,10 @@ service cloud.firestore {
     match /_config/{configId} {
       allow read, write: if isAdmin(); // Only admin can access Ghost Worker config
     }
+
+    match /_counters/{counterId} {
+      allow read, write: if isAdmin();
+    }
     
     match /ai_worker_logs/{logId} {
       allow read: if isAdmin(); // Only admin can read AI worker logs
@@ -442,6 +458,33 @@ service cloud.firestore {
     match /aiMigrationStats/{statId} {
       allow read: if isAdmin();
       allow write: if false;
+    }
+
+    // Community Discover — approved vendors readable by anyone (web token page + in-app);
+    // pending/rejected admin-only. Writes only via Cloud Functions.
+    match /community_vendors/{vendorId} {
+      allow read: if isAdmin()
+        || (resource.data.status == 'approved');
+      allow create, update, delete: if false;
+    }
+
+    match /community_vendor_votes/{voteId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    match /community_vendor_meta_votes/{voteId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
+
+    match /community_vendor_claims/{claimId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /_discover_tokens/{tokenId} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, ExternalLink, Globe, MoreHorizontal } from 'lucide-react';
-import { BookBookmark, Link as PhosphorLink, Notepad } from '@phosphor-icons/react';
+import { BookBookmark, Link as PhosphorLink, At, Notepad } from '@phosphor-icons/react';
 import { SiReddit, SiDiscord, SiTelegram, SiFacebook, SiX, SiYoutube } from 'react-icons/si';
 import TextInput from '../common/inputs/TextInput';
 import OwnerSelect from '../buddy/OwnerSelect';
@@ -215,7 +215,7 @@ export default function CommunityDetailsModal({ open, community, theme, onClose,
                     boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2), inset 0 1px 2px rgba(0,0,0,0.12)',
                 }}
             >
-                {community?.id ? 'Save Changes' : 'Save'}
+                {community?.id ? 'Update' : 'Save'}
             </button>
         </div>
     );
@@ -262,8 +262,8 @@ export default function CommunityDetailsModal({ open, community, theme, onClose,
                                     onClick={() => setForm({ ...form, platform: p.value, handle: '', url: '' })}
                                     className="flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all duration-200 active:scale-95"
                                     style={{
-                                        backgroundColor: selected ? '#445952' : (theme.isDark ? '#1f2937' : '#f5f4f0'),
-                                        border: selected ? '1px solid #3B4240' : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.05)' : '#e8e6df'}`,
+                                        backgroundColor: selected ? '#445952' : (theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
+                                        border: selected ? '1px solid #3B4240' : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
                                         color: selected ? '#fff' : (theme.isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'),
                                         boxShadow: selected
                                             ? 'inset 0 2px 4px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.1)'
@@ -291,7 +291,7 @@ export default function CommunityDetailsModal({ open, community, theme, onClose,
                 {/* ── SECTION: Link ─────────────────────── */}
                 <div className="pt-2">
                     <div className="flex items-center gap-4 mb-4">
-                        <PhosphorLink size={32} weight="duotone" style={{ color: theme.primary }} />
+                        <At size={32} weight="duotone" style={{ color: theme.primary }} />
                         <div className="flex flex-col gap-0.5 flex-1">
                             <h4 className="text-lg font-semibold tracking-wide" style={{ color: theme.text }}>Link / URL</h4>
                             <div className="flex items-center gap-2 ml-1">
@@ -314,6 +314,7 @@ export default function CommunityDetailsModal({ open, community, theme, onClose,
                                 })}
                                 placeholder={plat.placeholder}
                                 prefix={handlePrefix || null}
+                                hidePrefixUntilActive
                                 {...outlinedInputProps}
                             />
                             {resolvedUrl && (
@@ -359,7 +360,7 @@ export default function CommunityDetailsModal({ open, community, theme, onClose,
                                     style={{ color: theme.primary, WebkitTapHighlightColor: 'transparent' }}
                                 >
                                     <PhosphorLink size={12} weight="duotone" />
-                                    Paste custom URL instead
+                                    Use custom URL instead
                                 </button>
                             )
                         )}

@@ -9,9 +9,13 @@
 		<string>Default</string>
 	</array>
 	<key>com.apple.developer.associated-domains</key>
+
 	<array>
-		<string>webcredentials:thepepplanner.app</string>
+
 		<string>applinks:thepepplanner.app</string>
+
+		<string>webcredentials:thepepplanner.app</string>
+
 	</array>
 </dict>
 </plist>

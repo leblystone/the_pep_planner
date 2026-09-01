@@ -77,8 +77,12 @@ export default function SupportChatModal({
 
   const messagesEndRef = useRef(null);
   const messagesByTicket = useRef(new Map());
-  const ticketIdsKey = tickets.map((t) => t.id).join(',');
+  const ticketsRef = useRef(tickets);
+  ticketsRef.current = tickets;
+  const ticketIdsKey = tickets.map((t) => `${t.id}:${t.status || ''}`).join(',');
 
+  const ticketsSignature = (list) =>
+    (list || []).map((t) => `${t.id}:${t.status || ''}`).join('|');
   const tsToMs = (ts) => {
     if (!ts) return 0;
     if (typeof ts === 'number') return ts;
@@ -93,14 +97,30 @@ export default function SupportChatModal({
     return 0;
   };
 
-  // If allTicketsProp changes (parent refreshes), update — only when IDs actually change
-  // so inline `[ticket]` arrays from the parent don't thrash state every render.
+  // Sync ticket metadata (including status) from parent live inbox subscription.
   useEffect(() => {
     if (!allTicketsProp?.length) return;
-    const nextKey = allTicketsProp.map((t) => t.id).join(',');
-    const prevKey = tickets.map((t) => t.id).join(',');
-    if (nextKey !== prevKey) setTickets(allTicketsProp);
+    if (ticketsSignature(allTicketsProp) === ticketsSignature(tickets)) return;
+    setTickets(allTicketsProp);
   }, [allTicketsProp, tickets]);
+
+  // Live status from Firestore ticket docs (admin close / reopen must reflect immediately).
+  const ticketDocIdsKey = tickets.map((t) => t.id).join(',');
+  useEffect(() => {
+    if (isDevPreview || !ticketDocIdsKey) return undefined;
+    const db = getFirestore();
+    const ids = ticketDocIdsKey.split(',').filter(Boolean);
+    const unsubs = ids.map((ticketId) =>
+      onSnapshot(doc(db, 'supportTickets', ticketId), (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        setTickets((prev) =>
+          prev.map((t) => (t.id === ticketId ? { ...t, ...data, id: ticketId } : t))
+        );
+      })
+    );
+    return () => unsubs.forEach((fn) => fn());
+  }, [isDevPreview, ticketDocIdsKey]);
 
   // If no tickets were passed at all, try fetching from Firestore by user email.
   // Skip when embedded — parent deliberately scopes the thread (open ticket vs history).
@@ -147,13 +167,14 @@ export default function SupportChatModal({
         q,
         (snapshot) => {
           if (cancelled) return;
+          const liveTicket = ticketsRef.current.find((t) => t.id === ticket.id) || ticket;
           const msgs = snapshot.docs.map((d) => ({
             id: d.id,
             ...d.data(),
             _ticketId: ticket.id,
-            _ticketNumber: ticket.ticketNumber || ticket.id.slice(-6).toUpperCase(),
-            _ticketType: ticket.type || 'support',
-            _ticketStatus: ticket.status,
+            _ticketNumber: liveTicket.ticketNumber || ticket.id.slice(-6).toUpperCase(),
+            _ticketType: liveTicket.type || ticket.type || 'support',
+            _ticketStatus: liveTicket.status,
           }));
           messagesByTicket.current.set(ticket.id, msgs);
           rebuild();
@@ -175,6 +196,28 @@ export default function SupportChatModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDevPreview, ticketIdsKey]);
 
+  // When ticket status flips (e.g. admin closed), refresh message badges without re-subscribing.
+  useEffect(() => {
+    if (!tickets.length) return;
+    const statusById = new Map(tickets.map((t) => [t.id, t.status]));
+    let changed = false;
+    for (const [ticketId, msgs] of messagesByTicket.current.entries()) {
+      const status = statusById.get(ticketId);
+      if (!status || !msgs?.length) continue;
+      if (msgs[0]?._ticketStatus === status) continue;
+      messagesByTicket.current.set(
+        ticketId,
+        msgs.map((m) => ({ ...m, _ticketStatus: status }))
+      );
+      changed = true;
+    }
+    if (!changed) return;
+    const flat = [];
+    for (const msgs of messagesByTicket.current.values()) flat.push(...msgs);
+    flat.sort((a, b) => tsToMs(a.createdAt) - tsToMs(b.createdAt));
+    setAllMessages(flat);
+  }, [tickets]);
+
   // Scroll to bottom whenever messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -191,11 +234,7 @@ export default function SupportChatModal({
     const openTickets = tickets.filter(isOpen);
 
     if (openTickets.length === 0) {
-      return tickets.slice().sort((a, b) => {
-        const ta = tsToMs(a.lastMessageAt || a.updatedAt || a.createdAt);
-        const tb = tsToMs(b.lastMessageAt || b.updatedAt || b.createdAt);
-        return tb - ta;
-      })[0] || null;
+      return null;
     }
 
     if (openTickets.length === 1) return openTickets[0];
@@ -232,6 +271,13 @@ export default function SupportChatModal({
     if (!newMessage.trim() || !replyTarget?.id || !user) return;
     setSending(true);
     try {
+      const isClosed =
+        replyTarget.status === 'closed' || replyTarget.status === 'resolved';
+      if (isClosed) {
+        await reopenTicket(replyTarget.id);
+        if (onTicketUpdate) onTicketUpdate();
+      }
+
       const db = getFirestore();
       const messagesRef = collection(db, 'supportTickets', replyTarget.id, 'messages');
       await addDoc(messagesRef, {
@@ -278,10 +324,15 @@ export default function SupportChatModal({
       }));
       return;
     }
-    if (!replyTarget?.id || !user) return;
+    const target = tickets.slice().sort((a, b) => {
+      const ta = tsToMs(a.lastMessageAt || a.updatedAt || a.createdAt);
+      const tb = tsToMs(b.lastMessageAt || b.updatedAt || b.createdAt);
+      return tb - ta;
+    })[0];
+    if (!target?.id || !user) return;
     setReopening(true);
     try {
-      await reopenTicket(replyTarget.id);
+      await reopenTicket(target.id);
       if (onTicketUpdate) onTicketUpdate();
       window.dispatchEvent(new CustomEvent('tpp:toast', {
         detail: { message: 'Request reopened!', type: 'success' },

@@ -67,6 +67,26 @@ export function deleteSideEffect(id) {
 }
 
 /**
+ * Update an existing side effect entry. Returns the updated entry or null.
+ */
+export function updateSideEffect(id, updates = {}) {
+    const existing = loadSideEffects();
+    const idx = existing.findIndex(e => e.id === id);
+    if (idx === -1) return null;
+    const updated = {
+        ...existing[idx],
+        ...updates,
+        id: existing[idx].id,
+        createdAt: existing[idx].createdAt,
+        updatedAt: new Date().toISOString(),
+    };
+    existing[idx] = updated;
+    saveSideEffects(existing);
+    window.dispatchEvent(new CustomEvent('tpp:side-effects-updated', { detail: updated }));
+    return updated;
+}
+
+/**
  * Get entries for a specific date.
  */
 export function getSideEffectsForDate(dateStr) {

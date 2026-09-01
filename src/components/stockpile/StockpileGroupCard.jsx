@@ -34,17 +34,22 @@ export default function StockpileGroupCard({
   onViewDetails,
   onCompleteEntry,
   onRenameConfirm,
+  onConfirmLooksRight,
 }) {
   // Derive buddy ownership from the first item in the group
   const allItems = Object.values(group.variants).flatMap(v => v.items || []);
   const isBuddyOwned = allItems.some(i => i.ownerId && i.ownerId !== OWNER_SELF);
+  const needsReconfirm = allItems.some(i => i.needsReconfirm);
 
   const hasLowStock = Object.values(group.variants).some(v => v.totalVials <= 2);
-  const showChip = hasLowStock || hasMatchingIncoming;
-  const chipText = hasLowStock && hasMatchingIncoming
+  const showChip = hasLowStock || hasMatchingIncoming || needsReconfirm;
+  const chipText = needsReconfirm
+    ? 'Confirm Qty'
+    : hasLowStock && hasMatchingIncoming
     ? 'Low - More en Route'
     : hasMatchingIncoming ? 'En Route' : hasLowStock ? 'Low' : '';
-  const chipIsLowEnRoute = hasLowStock && hasMatchingIncoming;
+  const chipIsLowEnRoute = !needsReconfirm && hasLowStock && hasMatchingIncoming;
+  const chipIsReconfirm = needsReconfirm;
 
   const firstVariant = Object.values(group.variants)[0];
   const firstItem = firstVariant?.items?.[0];
@@ -415,12 +420,14 @@ export default function StockpileGroupCard({
                         className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider border flex-shrink-0"
                         style={{
                           fontFamily: 'Poppins, sans-serif',
-                          backgroundColor: 'transparent',
+                          backgroundColor: chipIsReconfirm ? 'rgba(245,158,11,0.12)' : 'transparent',
                           borderWidth: '1px',
-                          borderColor: chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
+                          borderColor: chipIsReconfirm
+                            ? (theme.isDark ? 'rgba(251, 191, 36, 0.55)' : 'rgba(202, 138, 4, 0.45)')
+                            : chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
                             ? (theme.isDark ? 'rgba(251, 191, 36, 0.5)' : 'rgba(202, 138, 4, 0.4)')
                             : (theme.isDark ? 'rgba(107, 142, 107, 0.5)' : 'rgba(85, 119, 85, 0.4)'),
-                          color: chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
+                          color: chipIsReconfirm || chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
                             ? (theme.isDark ? '#fbbf24' : '#ca8a04')
                             : (theme.isDark ? '#6b8e6b' : '#557755')
                         }}
@@ -433,6 +440,25 @@ export default function StockpileGroupCard({
               </div>
               {layoutMode === 'stacked' && (
                 <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                  {needsReconfirm && typeof onConfirmLooksRight === 'function' && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onConfirmLooksRight(group);
+                      }}
+                      className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border"
+                      style={{
+                        borderColor: theme.isDark ? 'rgba(251, 191, 36, 0.45)' : 'rgba(202, 138, 4, 0.4)',
+                        color: theme.isDark ? '#fbbf24' : '#ca8a04',
+                        backgroundColor: 'rgba(245,158,11,0.1)',
+                        fontFamily: 'Poppins, sans-serif',
+                      }}
+                      title="Confirm quantity looks right"
+                    >
+                      Looks Right
+                    </button>
+                  )}
                   <div className="flex flex-col items-end leading-none">
                     <div className="flex items-baseline gap-1">
                       <span className="text-xl font-black leading-none tracking-tight" style={{ color: theme.primary, fontFamily: 'Poppins, sans-serif' }}>
@@ -459,12 +485,14 @@ export default function StockpileGroupCard({
                 className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider border"
                 style={{
                   fontFamily: 'Poppins, sans-serif',
-                  backgroundColor: 'transparent',
+                  backgroundColor: chipIsReconfirm ? 'rgba(245,158,11,0.12)' : 'transparent',
                   borderWidth: '1px',
-                  borderColor: chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
+                  borderColor: chipIsReconfirm
+                    ? (theme.isDark ? 'rgba(251, 191, 36, 0.55)' : 'rgba(202, 138, 4, 0.45)')
+                    : chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
                     ? (theme.isDark ? 'rgba(251, 191, 36, 0.5)' : 'rgba(202, 138, 4, 0.4)')
                     : (theme.isDark ? 'rgba(107, 142, 107, 0.5)' : 'rgba(85, 119, 85, 0.4)'),
-                  color: chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
+                  color: chipIsReconfirm || chipIsLowEnRoute || (hasLowStock && !hasMatchingIncoming)
                     ? (theme.isDark ? '#fbbf24' : '#ca8a04')
                     : (theme.isDark ? '#6b8e6b' : '#557755')
                 }}

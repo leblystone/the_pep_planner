@@ -25,8 +25,9 @@ function stockBadgeStyle(stock) {
   return { bg: '#dcfce7', text: '#16a34a' };
 }
 
-export default function AdminMarketplaces() {
-  const { theme } = useOutletContext();
+export default function AdminMarketplaces({ embedded = false, theme: themeProp } = {}) {
+  const outlet = useOutletContext();
+  const theme = themeProp || outlet?.theme;
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [platformStatus, setPlatformStatus] = useState({});
@@ -88,8 +89,14 @@ export default function AdminMarketplaces() {
       toast('error', message ? decodeURIComponent(message) : 'Connection failed');
     }
 
-    setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams, loadStatus]);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams();
+      const view = prev.get('view');
+      if (view) next.set('view', view);
+      else if (embedded) next.set('view', 'marketplaces');
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams, loadStatus, embedded]);
 
   const loadProducts = async () => {
     try {
@@ -184,9 +191,17 @@ export default function AdminMarketplaces() {
     try {
       const syncAll = httpsCallable(functions, 'syncAllMarketplaceStock');
       const { data } = await syncAll();
-      const { synced = 0, errors = 0, skipped = 0 } = data || {};
-      if (errors > 0) {
-        toast('info', `Synced ${synced} products (${errors} errors, ${skipped} skipped)`);
+      const { synced = 0, partial = 0, errors = 0, skipped = 0, errorSamples = [] } = data || {};
+      if (errors > 0 || partial > 0) {
+        const detail = errorSamples[0]?.error;
+        toast(
+          'info',
+          detail
+            ? `Synced ${synced}, ${partial + errors} failed — ${errorSamples[0].name}: ${detail}`
+            : `Synced ${synced} products (${partial + errors} failed, ${skipped} skipped)`,
+        );
+      } else if (synced === 0) {
+        toast('warning', 'Nothing synced — connect Etsy/TikTok and add listing IDs on each product');
       } else {
         toast('success', `Stock synced to ${synced} product${synced !== 1 ? 's' : ''} across platforms`);
       }
@@ -226,13 +241,20 @@ export default function AdminMarketplaces() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-xl font-bold" style={{ color: theme.text }}>Marketplaces &amp; Inventory</h1>
-        <p className="text-sm mt-0.5" style={{ color: theme.textLight }}>
+    <div className={embedded ? 'space-y-6' : 'p-4 md:p-6 space-y-6 max-w-5xl'}>
+      {!embedded && (
+        <div>
+          <h1 className="text-xl font-bold" style={{ color: theme.text }}>Marketplaces &amp; Inventory</h1>
+          <p className="text-sm mt-0.5" style={{ color: theme.textLight }}>
+            Connect Etsy and TikTok Shop — stock stays in sync when orders come in anywhere
+          </p>
+        </div>
+      )}
+      {embedded && (
+        <p className="text-sm" style={{ color: theme.textLight }}>
           Connect Etsy and TikTok Shop — stock stays in sync when orders come in anywhere
         </p>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {PLATFORMS.map((platform) => {
@@ -417,19 +439,27 @@ export default function AdminMarketplaces() {
             <p className="text-xs font-semibold mb-2" style={{ color: theme.textLight }}>Sync history</p>
             <div className="space-y-1">
               {syncHistory.map((s, i) => (
-                <div key={i} className="flex items-center justify-between text-xs" style={{ color: theme.textLight }}>
-                  <span>
-                    {s.syncedAt.toLocaleString('en-US', {
-                      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-                    })}
-                    {' '}
-                    <span style={{ color: theme.textLight }}>by {s.triggeredBy}</span>
-                  </span>
-                  <span>
-                    <span style={{ color: '#16a34a' }}>{s.synced} synced</span>
-                    {s.errors > 0 && <span style={{ color: '#ef4444' }}> · {s.errors} error{s.errors !== 1 ? 's' : ''}</span>}
-                    {s.skipped > 0 && <span> · {s.skipped} skipped</span>}
-                  </span>
+                <div key={i} className="space-y-0.5 text-xs" style={{ color: theme.textLight }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>
+                      {s.syncedAt.toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                      })}
+                      {' '}
+                      <span style={{ color: theme.textLight }}>by {s.triggeredBy}</span>
+                    </span>
+                    <span>
+                      <span style={{ color: '#16a34a' }}>{s.synced} synced</span>
+                      {s.partial > 0 && <span style={{ color: '#ea580c' }}> · {s.partial} partial</span>}
+                      {s.errors > 0 && <span style={{ color: '#ef4444' }}> · {s.errors} error{s.errors !== 1 ? 's' : ''}</span>}
+                      {s.skipped > 0 && <span> · {s.skipped} skipped</span>}
+                    </span>
+                  </div>
+                  {s.errorSamples?.[0]?.error && (
+                    <div className="text-[10px] truncate" style={{ color: '#ef4444' }}>
+                      {s.errorSamples[0].name}: {s.errorSamples[0].error}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

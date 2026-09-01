@@ -23,6 +23,8 @@ export const SERVER_PUSH_TEMPLATE_IDS = new Set([
   'cycleEndReminder',
   'researchReminderAM',
   'researchReminderPM',
+  'researchReminderAMComplete',
+  'researchReminderPMComplete',
   'researchReminderCustom',
   'titrationDoseChange',
   'inactiveUser',
@@ -30,17 +32,17 @@ export const SERVER_PUSH_TEMPLATE_IDS = new Set([
   'groupBuyReminder',
   'supportTicketReply',
   'researchPlusExpiringSoon',
-  'freePlanActive',
-  'researchPlusWinback',
   'paymentFailedSoon',
 ]);
 
-/** Legacy client-only template IDs (removed from admin; ignored if still in Firestore). */
+/** Legacy / email-only template IDs (removed from push admin; ignored if still in Firestore). */
 export const DEPRECATED_PUSH_TEMPLATE_IDS = new Set([
   'orderArrived',
   'researchReminder',
   'trialEnding',
   'trialExtensionOffer',
+  'freePlanActive',
+  'researchPlusWinback',
 ]);
 
 /** All push/in-app templates — mirrored in functions/pushNotifications.js */
@@ -117,6 +119,18 @@ const DEFAULT_TEMPLATES = {
     actionText: 'View Schedule',
     actionUrl: '/app/dashboard',
   },
+  researchReminderAMComplete: {
+    title: '☀️ Morning research done',
+    body: 'Everything on your morning list is complete. Nice work!',
+    actionText: 'View Schedule',
+    actionUrl: '/app/dashboard',
+  },
+  researchReminderPMComplete: {
+    title: '✅ Research is done for today',
+    body: 'Research is done for today. Great work!',
+    actionText: 'View Schedule',
+    actionUrl: '/app/dashboard',
+  },
   researchReminderCustom: {
     title: '🔔 {peptideName} Reminder',
     body: 'Time for your scheduled research.',
@@ -154,21 +168,9 @@ const DEFAULT_TEMPLATES = {
     actionUrl: '/app/support',
   },
   researchPlusExpiringSoon: {
-    title: '⏳ Research+ expiring soon',
-    body: 'Your Research+ access ends in {daysLeft} days. Renew to keep unlimited protocols and cloud sync.',
-    actionText: 'Renew',
-    actionUrl: '/app/account/subscription',
-  },
-  freePlanActive: {
-    title: "You're on the free plan",
-    body: 'Your Pep Planner is on the free plan! Upgrade to Research+ anytime to unlock full access.',
-    actionText: 'View Plans',
-    actionUrl: '/app/account/subscription',
-  },
-  researchPlusWinback: {
-    title: 'Wanna jump back into Research+?',
-    body: "It's been a while — your research data is still here. Come back to Research+ anytime.",
-    actionText: 'Upgrade',
+    title: '⏳ Research+ trial ending soon',
+    body: 'Your Research+ trial ends in {daysLeft} days. Subscribe to keep unlimited protocols and cloud sync.',
+    actionText: 'Subscribe',
     actionUrl: '/app/account/subscription',
   },
   paymentFailedSoon: {

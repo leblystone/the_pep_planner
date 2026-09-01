@@ -1,5 +1,5 @@
 import React from 'react'
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate, useSearchParams } from 'react-router-dom'
 import App from './App.jsx'
 import NotFound from './pages/NotFound.jsx'
 import AppRouteError from './components/common/AppRouteError.jsx'
@@ -9,6 +9,14 @@ import { lazyWithRetry } from './utils/lazyWithRetry.jsx'
 
 // TEST COMPONENT - Remove in production
 import ErrorBoundaryTest from './components/test/ErrorBoundaryTest.jsx'
+
+/** Preserve query string when redirecting legacy shop sub-routes into Products views. */
+function ShopProductsViewRedirect({ view }) {
+  const [searchParams] = useSearchParams();
+  const next = new URLSearchParams(searchParams);
+  next.set('view', view);
+  return <Navigate to={`/admin/shop/products?${next.toString()}`} replace />;
+}
 
 const LandingWrapper = lazyWithRetry(() => import('./components/common/LandingWrapper.jsx'), 'LandingWrapper')
 const Landing = lazyWithRetry(() => import('./pages/Landing.jsx'), 'Landing')
@@ -81,14 +89,13 @@ const AdminSettingsSubscriptions = lazyWithRetry(() => import('./pages/admin/Adm
 const AdminAICosts = lazyWithRetry(() => import('./pages/admin/AdminAICosts.jsx'), 'AdminAICosts')
 const AdminPipInsights = lazyWithRetry(() => import('./pages/admin/AdminPipInsights.jsx'), 'AdminPipInsights')
 const AdminShopProducts = lazyWithRetry(() => import('./pages/admin/AdminShopProducts.jsx'), 'AdminShopProducts')
-const AdminShopReviews = lazyWithRetry(() => import('./pages/admin/AdminShopReviews.jsx'), 'AdminShopReviews')
 const AdminShopOrders = lazyWithRetry(() => import('./pages/admin/AdminShopOrders.jsx'), 'AdminShopOrders')
 const AdminShopMarketing = lazyWithRetry(() => import('./pages/admin/AdminShopMarketing.jsx'), 'AdminShopMarketing')
 const ShopReviews = lazyWithRetry(() => import('./pages/ShopReviews.jsx'), 'ShopReviews')
 const ShopWriteReview = lazyWithRetry(() => import('./pages/ShopWriteReview.jsx'), 'ShopWriteReview')
-const AdminMarketplaces = lazyWithRetry(() => import('./pages/admin/AdminMarketplaces.jsx'), 'AdminMarketplaces')
 const AdminShopInquiries = lazyWithRetry(() => import('./pages/admin/AdminShopInquiries.jsx'), 'AdminShopInquiries')
-const AdminShopWaitlist = lazyWithRetry(() => import('./pages/admin/AdminShopWaitlist.jsx'), 'AdminShopWaitlist')
+const AdminDiscover = lazyWithRetry(() => import('./pages/admin/AdminDiscover.jsx'), 'AdminDiscover')
+const WebDiscover = lazyWithRetry(() => import('./pages/WebDiscover.jsx'), 'WebDiscover')
 // Beta/launch pages removed for App Store compliance
 const CoverLanding = lazyWithRetry(() => import('./pages/CoverLanding.jsx'), 'CoverLanding')
 const About = lazyWithRetry(() => import('./pages/About.jsx'), 'About')
@@ -193,13 +200,16 @@ export const router = createBrowserRouter([
       
       // Shop section
       { path: 'shop/products', element: <AdminShopProducts /> },
-      { path: 'shop/reviews', element: <AdminShopReviews /> },
+      { path: 'shop/reviews', element: <ShopProductsViewRedirect view="reviews" /> },
       { path: 'shop/orders', element: <AdminShopOrders /> },
       { path: 'shop/marketing', element: <AdminShopMarketing /> },
-      { path: 'shop/marketplaces', element: <AdminMarketplaces /> },
+      { path: 'shop/marketplaces', element: <ShopProductsViewRedirect view="marketplaces" /> },
       { path: 'shop/inquiries', element: <AdminShopInquiries /> },
-      { path: 'shop/waitlist', element: <AdminShopWaitlist /> },
+      { path: 'shop/waitlist', element: <ShopProductsViewRedirect view="waitlist" /> },
       { path: 'shop', element: <Navigate to="/admin/shop/products" replace /> },
+
+      // Discover moderation
+      { path: 'discover', element: <AdminDiscover /> },
       
       // Comms section
       { path: 'comms/emails', element: <AdminCommsEmails /> },
@@ -257,6 +267,11 @@ export const router = createBrowserRouter([
   {
     path: '/about',
     element: <About />,
+    errorElement: <NotFound />,
+  },
+  {
+    path: '/discover',
+    element: <WebDiscover />,
     errorElement: <NotFound />,
   },
   {

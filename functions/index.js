@@ -21,6 +21,7 @@ const googlePlayBilling = require('./googlePlayBilling');
 const googlePlayWebhooks = require('./googlePlayWebhooks');
 const appleInAppPurchase = require('./appleInAppPurchase');
 const adminManualAppleGrant = require('./adminManualAppleGrant');
+const adminManualAndroidGrant = require('./adminManualAndroidGrant');
 const adminManualStripeGrant = require('./adminManualStripeGrant');
 const syncMyStripeSubscription = require('./syncMyStripeSubscription');
 const adminGrantFreeMonth = require('./adminGrantFreeMonth');
@@ -196,6 +197,7 @@ exports.manualProcessSquarespaceOrder = manualProcessSquarespaceOrder.manualProc
 exports.verifyAppleReceipt = appleInAppPurchase.verifyAppleReceipt;
 exports.appleWebhook = appleInAppPurchase.appleWebhook;
 exports.adminManualAppleGrant = adminManualAppleGrant.adminManualAppleGrant;
+exports.adminManualAndroidGrant = adminManualAndroidGrant.adminManualAndroidGrant;
 exports.adminManualStripeGrant = adminManualStripeGrant.adminManualStripeGrant;
 exports.syncMyStripeSubscription = syncMyStripeSubscription.syncMyStripeSubscription;
 exports.adminGrantFreeMonth = adminGrantFreeMonth.adminGrantFreeMonth;
@@ -1426,19 +1428,32 @@ exports.getPushDeliveryLog = onCall(
       throw new HttpsError('permission-denied', 'Admin access required');
     }
 
-    const limitN = Math.min(Math.max(Number(request.data?.limit) || 100, 1), 500);
+    // days: look back N calendar days (preferred for "are reminders working?").
+    // limit alone is a recent-N-events cap and can miss older days on busy accounts.
+    const daysRaw = request.data?.days;
+    const days = daysRaw != null && daysRaw !== '' ? Math.min(Math.max(Number(daysRaw) || 0, 0), 90) : 0;
+    const defaultLimit = days > 0 ? 2000 : 100;
+    const limitN = Math.min(Math.max(Number(request.data?.limit) || defaultLimit, 1), 2000);
     const statusFilter = request.data?.status || null;
     const prefTypeFilter = request.data?.prefType || null;
     const triggerFilter = request.data?.trigger || null;
     const userIdFilter = request.data?.userId || null;
 
-    let q = admin
+    const col = admin
       .firestore()
-      .collection(pushNotifications.PUSH_DELIVERY_LOG || 'pushDeliveryLog')
-      .orderBy('sentAt', 'desc')
-      .limit(limitN);
+      .collection(pushNotifications.PUSH_DELIVERY_LOG || 'pushDeliveryLog');
 
-    // Prefer simple orderBy + client-side filter when multiple filters (avoids composite indexes).
+    let q = col.orderBy('sentAt', 'desc');
+    if (days > 0) {
+      const since = admin.firestore.Timestamp.fromDate(
+        new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      );
+      // Same-field where + orderBy — no composite index required.
+      q = col.where('sentAt', '>=', since).orderBy('sentAt', 'desc');
+    }
+    q = q.limit(limitN);
+
+    // Prefer simple query + client-side filter when multiple filters (avoids composite indexes).
     const snap = await q.get();
     let entries = snap.docs.map((doc) => {
       const d = doc.data() || {};
@@ -1472,6 +1487,8 @@ exports.getPushDeliveryLog = onCall(
     return {
       success: true,
       count: entries.length,
+      days: days || null,
+      limit: limitN,
       entries,
     };
   }
@@ -5629,7 +5646,6 @@ exports.onSupportTicketUserMessageAdminAlert = onDocumentCreated(
         ticketNumber: ticket.ticketNumber || '',
         subject: ticket.subject || '',
         preview: messageData.message || messageData.text || '',
-        ticketType: ticket.type || '',
         kind,
       });
     } catch (error) {
@@ -7312,3 +7328,7 @@ exports.generatePasskeyLoginOptions = passkeyAuth.generatePasskeyLoginOptions;
 exports.verifyPasskeyLogin = passkeyAuth.verifyPasskeyLogin;
 exports.listPasskeys = passkeyAuth.listPasskeys;
 exports.removePasskey = passkeyAuth.removePasskey;
+
+// ==================== COMMUNITY DISCOVER ====================
+const discoverVendors = require('./discoverVendors');
+exports.discoverApi = discoverVendors.discoverApi;

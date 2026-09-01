@@ -640,7 +640,7 @@ const TaskListSection = ({
                                         aria-label="Schedule options"
                                         title="Schedule options"
                                     >
-                                        <DotsThreeVertical size={16} weight="bold" className="sm:w-[18px] sm:h-[18px]" />
+                                        <DotsThreeVertical size={20} weight="bold" className="sm:w-[22px] sm:h-[22px]" />
                                     </button>
                                 </div>
                             )}

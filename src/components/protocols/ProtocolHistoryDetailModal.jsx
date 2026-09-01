@@ -289,6 +289,8 @@ export default function ProtocolHistoryDetailModal({ open, onClose, historyEntry
                 return { icon: CalendarX, color: theme.textLight, label: 'Ended Early', bgColor: theme.isDark ? 'rgba(165,182,190,0.22)' : 'rgba(138, 128, 119, 0.16)', textColor: theme.isDark ? theme.accent : theme.text };
             case 'rescheduled':
                 return { icon: CalendarClock, color: theme.warning, label: 'Rescheduled', bgColor: theme.isDark ? (theme.warningBg || 'rgba(120, 53, 15, 0.35)') : (theme.warningBg || '#FDF8E8'), textColor: theme.isDark ? theme.warning : (theme.text || '#1E2B2A') };
+            case 'ended_reengagement':
+                return { icon: CalendarClock, color: theme.primary || '#7F9E95', label: 'Closed on Return', bgColor: theme.isDark ? 'rgba(127,158,149,0.22)' : 'rgba(127,158,149,0.16)', textColor: theme.isDark ? theme.primary : (theme.primaryDark || theme.primary) };
             default:
                 return { icon: Clock, color: theme.textLight, label: 'Unknown', bgColor: theme.secondary, textColor: theme.textLight };
         }

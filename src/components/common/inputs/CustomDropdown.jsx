@@ -23,6 +23,7 @@ export default function CustomDropdown({
     const [menuStyle, setMenuStyle] = useState({});
     const dropdownRef = useRef(null);
     const buttonRef = useRef(null);
+    const menuRef = useRef(null);
 
     const calcMenuStyle = useCallback(() => {
         if (!buttonRef.current) return;
@@ -57,18 +58,28 @@ export default function CustomDropdown({
             }
         };
         const handleClose = () => setIsOpen(false);
+        // Scroll events don't bubble, but capture:true on window still sees them.
+        // Closing on *every* scroll made the menu dismiss while scrolling its own list
+        // (e.g. EmailTemplateManager "Choose template" with 40 options).
+        const handleScroll = (event) => {
+            const target = event.target;
+            if (menuRef.current && (menuRef.current === target || menuRef.current.contains(target))) {
+                return;
+            }
+            setIsOpen(false);
+        };
 
         if (isOpen) {
             document.addEventListener('mousedown', handleOutside);
             document.addEventListener('touchstart', handleOutside);
-            window.addEventListener('scroll', handleClose, { passive: true, capture: true });
+            window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
             window.addEventListener('resize', handleClose, { passive: true });
         }
 
         return () => {
             document.removeEventListener('mousedown', handleOutside);
             document.removeEventListener('touchstart', handleOutside);
-            window.removeEventListener('scroll', handleClose, { capture: true });
+            window.removeEventListener('scroll', handleScroll, { capture: true });
             window.removeEventListener('resize', handleClose);
         };
     }, [isOpen]);
@@ -138,6 +149,7 @@ export default function CustomDropdown({
             {/* Dropdown Menu — rendered via portal so it escapes any clipping stacking context */}
             {isOpen && createPortal(
                 <div
+                    ref={menuRef}
                     data-dropdown-menu
                     style={{
                         ...menuStyle,
@@ -156,7 +168,10 @@ export default function CustomDropdown({
                             maxHeight: 'inherit',
                         }}
                     >
-                        <div className="overflow-y-auto overflow-x-hidden min-h-0" style={{ maxHeight: 'inherit' }}>
+                        <div
+                            className="overflow-y-auto overflow-x-hidden min-h-0"
+                            style={{ maxHeight: 'inherit', overscrollBehavior: 'contain' }}
+                        >
                             {options && options.length > 0 ? options.map((option, index) => {
                                 const isSelected = value === option.value;
                                 const prevGroup = index > 0 ? options[index - 1]?.group : null;
@@ -174,9 +189,6 @@ export default function CustomDropdown({
                                         <button
                                             type="button"
                                             onMouseDown={(e) => {
-                                                e.preventDefault();
-                                            }}
-                                            onTouchStart={(e) => {
                                                 e.preventDefault();
                                             }}
                                             onClick={(e) => {

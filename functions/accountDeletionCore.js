@@ -267,18 +267,34 @@ async function cancelGooglePlayAtPeriodEnd(gpToken, gpProductId) {
       scopes: ['https://www.googleapis.com/auth/androidpublisher'],
     });
     const client = google.androidpublisher({ version: 'v3', auth });
-    await client.purchases.subscriptions.cancel({
-      packageName: PACKAGE_NAME,
-      subscriptionId: gpProductId,
-      token: gpToken,
-      requestBody: {
-        cancellationType: 'USER_REQUESTED_STOP_RENEWALS',
-      },
-    });
-    return { ok: true, reason: 'google_play_stop_renewals' };
+
+    // Use subscriptionsv2.cancel — the v1 cancel API ignores cancellationType
+    // in the client library; v2 is required to stop renewals (not revoke immediately).
+    try {
+      await client.purchases.subscriptionsv2.cancel({
+        packageName: PACKAGE_NAME,
+        token: gpToken,
+        requestBody: {
+          cancellationContext: {
+            cancellationType: 'USER_REQUESTED_STOP_RENEWALS',
+          },
+        },
+      });
+      return { ok: true, reason: 'google_play_stop_renewals' };
+    } catch (v2Err) {
+      // v2 may not be available on older googleapis versions — fall back to v1
+      logger.warn(`⚠️ subscriptionsv2.cancel failed (${v2Err.message}), trying v1 fallback`);
+      await client.purchases.subscriptions.cancel({
+        packageName: PACKAGE_NAME,
+        subscriptionId: gpProductId,
+        token: gpToken,
+      });
+      return { ok: true, reason: 'google_play_stop_renewals_v1' };
+    }
   } catch (error) {
-    logger.warn(`⚠️ Google Play cancel at period end failed: ${error.message}`);
-    return { ok: false, reason: error.message || 'google_play_cancel_failed' };
+    const msg = error?.response?.data?.error?.message || error.message || 'google_play_cancel_failed';
+    logger.warn(`⚠️ Google Play cancel at period end failed: ${msg}`);
+    return { ok: false, reason: msg };
   }
 }
 
@@ -408,7 +424,7 @@ async function schedulePlatformCancellation({
       action: result.reason || 'google_play_cancel',
       warning: result.ok
         ? null
-        : 'Google Play could not stop renewals — verify token in Play Console',
+        : `Google Play could not stop renewals: ${result.reason || 'unknown error'}`,
     };
   }
 

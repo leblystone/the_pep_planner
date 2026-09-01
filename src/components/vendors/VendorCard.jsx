@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import {
   IconContext,
   Star,
@@ -82,10 +83,13 @@ function buildContactHref(type, rawValue) {
 }
 
 
-export default function VendorCard({ vendor, theme, onEditClick, onManageProtocolClick, onForceDelete, isPublicView = false, hideFooter = false }) {
+export default function VendorCard({ vendor, theme, onEditClick, onManageProtocolClick, onForceDelete, onToggleFavorite, isPublicView = false, hideFooter = false }) {
     const { orders: contextOrders } = useAppContext();
     const simpleMode = useIsSimpleMode();
     const [isShareModalOpen, setShareModalOpen] = useState(false);
+    const [starPop, setStarPop] = useState(false);
+    const favorited = Boolean(vendor?.favorited);
+    const starColor = theme.primary || '#7F9E95';
 
     const handleShare = () => {
         setShareModalOpen(true);
@@ -138,9 +142,8 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
 
     return (
         <IconContext.Provider value={{ weight: 'duotone' }}>
-        <>
             <div 
-                className={`rounded-2xl p-4 transition-all duration-200 cursor-pointer flex flex-col h-full glass-panel-minimal ${vendor.isStub ? 'ring-2 ring-opacity-50' : ''}`} 
+                className={`rounded-2xl p-4 transition-[box-shadow,opacity] duration-200 cursor-pointer flex flex-col glass-panel-minimal ${vendor.isStub ? 'ring-2 ring-opacity-50' : ''}`} 
                 style={{
                     ...cardStyle, 
                     '--tw-ring-color': vendor.isStub ? theme.primary : 'transparent',
@@ -157,9 +160,55 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                             </h3>
                             {!isPublicView && !simpleMode && <OwnerChip ownerId={vendor.ownerId} theme={theme} compact />}
                         </div>
+                        <div className="flex items-center gap-1" aria-label={`Rating ${vendor.rating || 0} of 5`}>
+                            {[1, 2, 3, 4, 5].map(n => {
+                                const fillSteps = ['#7A8E85', '#6B7F77', '#566D64', '#445952', '#3B4240'];
+                                const isFilled = (vendor.rating || 0) >= n;
+                                return (
+                                    <Star
+                                        key={n}
+                                        size={16}
+                                        weight={isFilled ? 'fill' : 'regular'}
+                                        style={{
+                                            color: isFilled
+                                                ? fillSteps[n - 1]
+                                                : (theme.isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)'),
+                                        }}
+                                    />
+                                );
+                            })}
+                        </div>
                     </div>
                     
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {!isPublicView && (
+                            <motion.button
+                                type="button"
+                                layout={false}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setStarPop(true);
+                                    onToggleFavorite?.(vendor);
+                                    window.setTimeout(() => setStarPop(false), 320);
+                                }}
+                                className="p-0.5 rounded-md touch-manipulation"
+                                style={{
+                                    color: starColor,
+                                    opacity: favorited ? 1 : 0.55,
+                                    WebkitTapHighlightColor: 'transparent',
+                                }}
+                                aria-label={favorited ? 'Unfavorite vendor' : 'Favorite vendor'}
+                                aria-pressed={favorited}
+                                title={favorited ? 'Unpin from top' : 'Pin to top'}
+                                whileTap={{ y: -8, scale: 1.12 }}
+                                animate={starPop
+                                    ? { y: [0, -16, 0], scale: [1, 1.3, 1] }
+                                    : { y: 0, scale: 1 }}
+                                transition={{ type: 'spring', stiffness: 520, damping: 18 }}
+                            >
+                                <Star size={22} weight={favorited ? 'fill' : 'regular'} />
+                            </motion.button>
+                        )}
                         {vendor.isStub && (
                             <div 
                                 className="px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest shadow-sm"
@@ -196,9 +245,9 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                             />
                             
                             {/* Section Header */}
-                            <div className="text-[10px] font-medium uppercase tracking-widest mb-2 opacity-60 flex items-center" style={{ color: theme.text }}>
+                            <div className="text-[11px] font-medium uppercase tracking-widest mb-2 opacity-60 flex items-center" style={{ color: theme.text }}>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <ChatText size={10} style={{ color: theme.primary }} />
+                                    <ChatText size={14} weight="duotone" style={{ color: theme.primary }} />
                                     Contacts
                                 </div>
                                 <div className="h-px flex-1 ml-3 opacity-30" style={{ backgroundColor: theme.primary }} />
@@ -252,7 +301,8 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                         </div>
                     )}
 
-                    {/* Payments & Labels Section — Simple keeps rating only (matches VendorDetailsModal) */}
+                    {/* Payments & Labels — rating lives under the vendor name */}
+                    {!simpleMode && (paymentMethods.length > 0 || (vendor.labels && vendor.labels.length > 0)) && (
                     <div className="relative pl-3">
                         <div 
                             className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full"
@@ -260,30 +310,30 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                         />
                         
                         {/* Section Header */}
-                        <div className="text-[10px] font-medium uppercase tracking-widest mb-2 opacity-60 flex items-center" style={{ color: theme.text }}>
+                        <div className="text-[11px] font-medium uppercase tracking-widest mb-2 opacity-60 flex items-center" style={{ color: theme.text }}>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                                <CreditCard size={10} style={{ color: theme.primary }} />
-                                {simpleMode ? 'Rating' : 'Trust & Payments'}
+                                <CreditCard size={14} weight="duotone" style={{ color: theme.primary }} />
+                                Trust & Payments
                             </div>
                             <div className="h-px flex-1 ml-3 opacity-30" style={{ backgroundColor: theme.primary }} />
                         </div>
 
                         <div className="space-y-2">
-                            {!simpleMode && paymentMethods.length > 0 && (
+                            {paymentMethods.length > 0 && (
                                 <div className="flex flex-wrap gap-1.5">
                                     {paymentMethods.map(({ label, Icon }) => (
                                         <span 
                                             key={label} 
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium" 
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium" 
                                             style={{ backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)', color: theme.text }}
                                         >
-                                            <Icon className="w-3 h-3 opacity-70" />
+                                            <Icon className="w-3.5 h-3.5 opacity-80" />
                                             {label}
                                         </span>
                                     ))}
                                 </div>
                             )}
-                            {!simpleMode && vendor.labels && vendor.labels.length > 0 && (
+                            {vendor.labels && vendor.labels.length > 0 && (
                                 <div className="flex flex-wrap gap-1.5">
                                     {vendor.labels.map(l => {
                                         let backgroundColor, color;
@@ -313,7 +363,7 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                                         return (
                                             <span 
                                                 key={l} 
-                                                className="px-2 py-0.5 rounded-md text-[10px] font-semibold"
+                                                className="px-2.5 py-1 rounded-lg text-xs font-semibold"
                                                 style={{ backgroundColor, color }}
                                             >
                                                 {l}
@@ -322,23 +372,9 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                                     })}
                                 </div>
                             )}
-                            <div className="flex items-center gap-1 pt-0.5">
-                                {[1, 2, 3, 4, 5].map(n => {
-                                    const alphaSteps = ['44', '66', '88', 'BB', 'FF'];
-                                    const filledColor = theme.primary + alphaSteps[n - 1];
-                                    const isFilled = (vendor.rating || 0) >= n;
-                                    return (
-                                        <Star
-                                          key={n}
-                                          size={14}
-                                          weight={isFilled ? 'fill' : 'duotone'}
-                                          style={{ color: isFilled ? filledColor : (theme.isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)') }}
-                                        />
-                                    );
-                                })}
-                            </div>
                         </div>
                     </div>
+                    )}
 
                     {/* Notes Section - Expandable */}
                     {!simpleMode && vendor.notes && vendor.notes.trim() && (
@@ -376,11 +412,11 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                 {/* Footer Section - Action buttons and Expand Indicator */}
                 {!hideFooter && (
                 <div className="mt-3 pt-3 border-t flex items-center justify-center relative" style={{ borderColor: theme.isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)' }}>
-                    <div className="flex items-center gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
-                        <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: theme.text }}>
-                            View Details
+                    <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <span className="text-xs sm:text-sm font-semibold uppercase tracking-widest" style={{ color: theme.text }}>
+                            Edit
                         </span>
-                        <CaretDown size={12} weight="bold" style={{ color: theme.primary }} />
+                        <CaretDown size={18} weight="bold" style={{ color: theme.primary }} />
                     </div>
 
                     {!isPublicView && (
@@ -396,14 +432,14 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                                 onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                                 title="Share vendor"
                             >
-                                <ShareNetwork size={14} style={{ color: theme.textLight }} />
+                                <ShareNetwork size={18} style={{ color: theme.textLight }} />
                             </button>
                         </div>
                     )}
                 </div>
                 )}
             </div>
-            {/* ShareModal remains unchanged */}
+            {isShareModalOpen && (
             <ShareModal
                 open={isShareModalOpen}
                 onClose={() => setShareModalOpen(false)}
@@ -412,7 +448,7 @@ export default function VendorCard({ vendor, theme, onEditClick, onManageProtoco
                 cardProps={{ vendor: vendor, theme, isPublicView: true }}
                 shareData={{ ...vendor, type: 'vendor' }}
             />
-        </>
+            )}
         </IconContext.Provider>
     );
 }

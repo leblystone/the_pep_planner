@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   Plus, PencilSimple, Trash, FloppyDisk, X, CircleNotch, Eye, EyeSlash,
   Upload, Image as ImageIcon, DotsSixVertical, BookOpen, Package, Download,
   CaretDown, CaretUp, Warning, Sparkle, HandCoins, Storefront,
-  ImagesSquare, LinkSimple, Truck,
+  ImagesSquare, LinkSimple, Truck, Bell, Star,
 } from '@phosphor-icons/react';
 import {
   fetchAllShopProducts, saveShopProduct, deleteShopProduct,
@@ -15,6 +15,21 @@ import { uploadShopProductImage, uploadShopDigitalFile, deleteImageFromStorage, 
 import { auth } from '../../config/firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { AdminBottomSheet } from '../../components/admin/adminUi';
+import AdminShopWaitlist from './AdminShopWaitlist';
+import AdminShopReviews from './AdminShopReviews';
+import AdminMarketplaces from './AdminMarketplaces';
+
+const PRODUCT_VIEWS = [
+  { id: 'products', label: 'Products', icon: Package },
+  { id: 'waitlist', label: 'Waitlist', icon: Bell },
+  { id: 'reviews', label: 'Reviews', icon: Star },
+  { id: 'marketplaces', label: 'Marketplaces', icon: Storefront },
+];
+
+function resolveProductView(raw) {
+  if (raw === 'waitlist' || raw === 'reviews' || raw === 'marketplaces') return raw;
+  return 'products';
+}
 
 const CATEGORY_OPTIONS = Object.entries(PRODUCT_CATEGORIES).map(([value, label]) => ({ value, label }));
 const SIZE_OPTIONS = [
@@ -114,6 +129,8 @@ function FieldHint({ children, theme }) {
 
 export default function AdminShopProducts() {
   const { theme } = useOutletContext();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = resolveProductView(searchParams.get('view'));
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -134,6 +151,10 @@ export default function AdminShopProducts() {
   const dragOver = useRef(null);
   const fileInputRef = useRef(null);
   const pendingSlotRef = useRef(null);
+
+  const switchView = (next) => {
+    setSearchParams(next === 'products' ? {} : { view: next }, { replace: true });
+  };
 
   useEffect(() => { loadProducts(); }, []);
 
@@ -493,10 +514,13 @@ export default function AdminShopProducts() {
   };
 
   const filtered = filterCategory === 'all' ? products : products.filter((p) => p.category === filterCategory);
-  const activeCount = products.filter((p) => p.active).length;
+  const isProducts = view === 'products';
+  const isWaitlist = view === 'waitlist';
+  const isReviews = view === 'reviews';
+  const isMarketplaces = view === 'marketplaces';
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-5xl">
+    <div className="space-y-5 max-w-5xl min-w-0 w-full">
       <input
         ref={fileInputRef}
         type="file"
@@ -505,38 +529,71 @@ export default function AdminShopProducts() {
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden', pointerEvents: 'none' }}
         tabIndex={-1}
       />
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold" style={{ color: theme.text }}>Shop Products</h1>
-          <p className="text-sm mt-0.5" style={{ color: theme.textLight }}>
-            {products.length} products ({activeCount} active)
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={editingId ? handleSave : openCreateForm}
-          disabled={editingId && isSaving}
-          aria-label={editingId ? (isSaving ? 'Saving product' : 'Update product') : 'Add product'}
-          title={editingId ? (isSaving ? 'Saving…' : 'Update product') : 'Add product'}
-          className="flex items-center justify-center w-10 h-10 rounded-full text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-60 shadow-md"
+      <div className="flex items-start gap-2 min-w-0">
+        <div
+          className="grid grid-cols-2 sm:flex flex-1 min-w-0 rounded-xl border p-1 gap-1"
           style={{
-            background: editingId && isSaving
-              ? theme.secondary
-              : `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark || theme.primary} 100%)`,
-            boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.15)',
+            borderColor: theme.border,
+            backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : '#e8eaed',
           }}
+          role="tablist"
+          aria-label="Products view"
         >
-          {editingId && isSaving ? (
-            <CircleNotch size={20} className="animate-spin" />
-          ) : editingId ? (
-            <FloppyDisk size={20} weight="bold" />
-          ) : (
-            <Plus size={22} weight="bold" />
-          )}
-        </button>
+          {PRODUCT_VIEWS.map(({ id, label, icon: Icon }) => {
+            const active = view === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => switchView(id)}
+                className="sm:flex-1 flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors min-w-0"
+                style={{
+                  backgroundColor: active ? theme.primary : 'transparent',
+                  color: active ? '#fff' : theme.text,
+                }}
+              >
+                <Icon size={16} weight="duotone" className="shrink-0" />
+                <span className="truncate">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+        {isProducts && (
+          <button
+            type="button"
+            onClick={editingId ? handleSave : openCreateForm}
+            disabled={editingId && isSaving}
+            aria-label={editingId ? (isSaving ? 'Saving product' : 'Update product') : 'Add product'}
+            title={editingId ? (isSaving ? 'Saving…' : 'Update product') : 'Add product'}
+            className="flex items-center justify-center w-10 h-10 rounded-full text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-60 shadow-md shrink-0"
+            style={{
+              background: editingId && isSaving
+                ? theme.secondary
+                : `linear-gradient(135deg, ${theme.primary} 0%, ${theme.primaryDark || theme.primary} 100%)`,
+              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.15)',
+            }}
+          >
+            {editingId && isSaving ? (
+              <CircleNotch size={20} className="animate-spin" />
+            ) : editingId ? (
+              <FloppyDisk size={20} weight="bold" />
+            ) : (
+              <Plus size={22} weight="bold" />
+            )}
+          </button>
+        )}
       </div>
 
+      {isWaitlist ? (
+        <AdminShopWaitlist embedded theme={theme} />
+      ) : isReviews ? (
+        <AdminShopReviews embedded theme={theme} />
+      ) : isMarketplaces ? (
+        <AdminMarketplaces embedded theme={theme} />
+      ) : (
+      <>
       {/* Create / Edit Form */}
       <AdminBottomSheet
         open={showForm}
@@ -973,10 +1030,10 @@ export default function AdminShopProducts() {
       </AdminBottomSheet>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 overflow-x-auto">
+      <div className="flex gap-1 overflow-x-auto min-w-0 -mx-1 px-1 pb-0.5">
         <button
           onClick={() => setFilterCategory('all')}
-          className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${filterCategory === 'all' ? 'text-white' : ''}`}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${filterCategory === 'all' ? 'text-white' : ''}`}
           style={filterCategory === 'all' ? { backgroundColor: theme.primary } : { color: theme.textLight, backgroundColor: `${theme.text}08` }}
         >
           All ({products.length})
@@ -988,7 +1045,7 @@ export default function AdminShopProducts() {
             <button
               key={cat.value}
               onClick={() => setFilterCategory(cat.value)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${active ? 'text-white' : ''}`}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${active ? 'text-white' : ''}`}
               style={active ? { backgroundColor: theme.primary } : { color: theme.textLight, backgroundColor: `${theme.text}08` }}
             >
               {cat.label} ({count})
@@ -1102,6 +1159,8 @@ export default function AdminShopProducts() {
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -174,6 +174,14 @@ export default function ProtocolFollowUpModal({ open, onClose, protocol, history
                         textColor: theme.isDark ? theme.warning : (theme.text || '#1E2B2A')
                     };
                     break;
+                case 'ended_reengagement':
+                    statusInfo = {
+                        icon: CalendarClock,
+                        label: 'Closed on Return',
+                        bgColor: theme.isDark ? 'rgba(127,158,149,0.22)' : 'rgba(127,158,149,0.16)',
+                        textColor: theme.isDark ? theme.primary : (theme.primaryDark || theme.primary)
+                    };
+                    break;
             }
         }
 

@@ -1011,11 +1011,11 @@ body .grecaptcha-badge,
    These rules ensure proper spacing and layout on tablets (iPad, etc.)
    =================================================================== */
 
-/* Tablet portrait (768px+): Add breathing room */
-@media (min-width: 768px) {
-  .native-app .main-content {
-    padding-left: 1rem;
-    padding-right: 1rem;
+/* Tablet portrait (768px+): Add breathing room — native app + web */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .main-content:not(.calendar-page):not(.insights-page) {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
   }
 }
 

@@ -6,7 +6,8 @@ export default function StockpileCard({
   theme, 
   onEdit, 
   onAddToBuy = () => {},
-  showActions = true 
+  showActions = true,
+  onConfirmLooksRight,
 }) {
   if (!item) return null;
 
@@ -31,18 +32,42 @@ export default function StockpileCard({
     return theme.success;
   };
 
+  const needsReconfirm = !!item.needsReconfirm;
+
   return (
     <div 
-      className="rounded-2xl p-6 transition-all duration-200 cursor-pointer glass-panel-minimal"
+      className="rounded-2xl p-6 transition-all duration-200 cursor-pointer glass-panel-minimal relative"
       style={{
         WebkitBackdropFilter: 'blur(16px) saturate(180%)',
-        border: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`,
+        border: `1px solid ${needsReconfirm
+          ? (theme.isDark ? 'rgba(251,191,36,0.45)' : 'rgba(202,138,4,0.4)')
+          : (theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')}`,
         boxShadow: theme.isDark
           ? '0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
           : '0 2px 16px rgba(0, 0, 0, 0.06), 0 8px 32px rgba(0, 0, 0, 0.04)',
       }}
       onClick={() => onEdit?.(item)}
     >
+      {needsReconfirm && (
+        <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+          <span
+            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: 'rgba(245,158,11,0.14)', color: '#f59e0b' }}
+          >
+            Confirm Qty
+          </span>
+          {typeof onConfirmLooksRight === 'function' && (
+            <button
+              type="button"
+              className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{ backgroundColor: `${theme.primary}22`, color: theme.primary }}
+              onClick={() => onConfirmLooksRight(item)}
+            >
+              Looks Right
+            </button>
+          )}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">

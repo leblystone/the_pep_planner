@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { CurrencyDollar, Users, TrendUp, TrendDown, ArrowsClockwise, CreditCard, DeviceMobile, AppleLogo } from '@phosphor-icons/react';
+import { CurrencyDollar, Users, TrendUp, TrendDown, ArrowsClockwise, CreditCard, DeviceMobile, AppleLogo, Warning } from '@phosphor-icons/react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../config/firebase';
 import { adminCacheGet, adminCacheSet } from '../../utils/adminSessionCache';
 
 const REVENUE_CACHE_KEY = 'admin:revenue';
-const REVENUE_CACHE_TTL = 15 * 60 * 1000; // 15 min — Cloud Fn + Stripe, very expensive
+const APPLE_CACHE_KEY = 'admin:apple-revenue';
+const REVENUE_CACHE_TTL = 15 * 60 * 1000;
 
 export default function AdminRevenue() {
   const { theme } = useOutletContext();
   const [metrics, setMetrics] = useState(() => adminCacheGet(REVENUE_CACHE_KEY));
   const [loading, setLoading] = useState(() => !adminCacheGet(REVENUE_CACHE_KEY));
   const [error, setError] = useState(null);
+  const [appleData, setAppleData] = useState(() => adminCacheGet(APPLE_CACHE_KEY));
+  const [appleLoading, setAppleLoading] = useState(() => !adminCacheGet(APPLE_CACHE_KEY));
+  const [appleError, setAppleError] = useState(null);
 
   const fetchMetrics = async (force = false) => {
     if (!force) {
@@ -34,7 +38,29 @@ export default function AdminRevenue() {
     }
   };
 
-  useEffect(() => { fetchMetrics(false); }, []);
+  const fetchAppleRevenue = async (force = false) => {
+    if (!force) {
+      const cached = adminCacheGet(APPLE_CACHE_KEY);
+      if (cached) { setAppleData(cached); setAppleLoading(false); return; }
+    }
+    setAppleLoading(true);
+    setAppleError(null);
+    try {
+      const fn = httpsCallable(functions, 'getAppleRevenueReport');
+      const result = await fn();
+      setAppleData(result.data);
+      adminCacheSet(APPLE_CACHE_KEY, result.data, REVENUE_CACHE_TTL);
+    } catch (err) {
+      setAppleError(err?.message || 'Failed to load Apple revenue');
+    } finally {
+      setAppleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMetrics(false);
+    fetchAppleRevenue(false);
+  }, []);
 
   const cardStyle = {
     backgroundColor: theme.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
@@ -150,6 +176,74 @@ export default function AdminRevenue() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Apple App Store Revenue */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <AppleLogo size={16} style={{ color: theme.text }} />
+            <h3 className="text-sm font-semibold" style={{ color: theme.text }}>App Store Proceeds</h3>
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', color: theme.textLight }}>
+              Live via ASC API
+            </span>
+          </div>
+          <button onClick={() => fetchAppleRevenue(true)} className="text-xs" style={{ color: theme.textLight }}>
+            <ArrowsClockwise size={13} className={appleLoading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        {appleLoading && (
+          <div className="flex items-center gap-2 py-4" style={{ color: theme.textLight }}>
+            <ArrowsClockwise size={14} className="animate-spin" />
+            <span className="text-xs">Fetching App Store reports…</span>
+          </div>
+        )}
+
+        {appleError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg text-xs" style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: '#EF4444' }}>
+            <Warning size={14} />
+            {appleError.includes('not_configured') ? 'Apple ASC API key not configured.' : appleError}
+          </div>
+        )}
+
+        {!appleLoading && appleData?.ok && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div style={cardStyle}>
+              <p className="text-xs mb-1" style={{ color: theme.textLight }}>Proceeds ({appleData.currentReportDate})</p>
+              <p className="text-2xl font-bold" style={{ color: '#10B981' }}>${(appleData.currentMonthProceeds || 0).toFixed(2)}</p>
+              <p className="text-xs mt-1" style={{ color: theme.textLight }}>After Apple's cut</p>
+            </div>
+            <div style={cardStyle}>
+              <p className="text-xs mb-1" style={{ color: theme.textLight }}>Subscription Units</p>
+              <p className="text-2xl font-bold" style={{ color: theme.primary }}>{appleData.currentMonthUnits || 0}</p>
+              <p className="text-xs mt-1" style={{ color: theme.textLight }}>New/renewed this month</p>
+            </div>
+            <div style={cardStyle}>
+              <p className="text-xs mb-2" style={{ color: theme.textLight }}>3-Month Trend</p>
+              {(appleData.months || []).slice(0, 3).map((m) => (
+                <div key={m.reportDate} className="flex justify-between text-xs mb-1">
+                  <span style={{ color: theme.textLight }}>{m.reportDate}</span>
+                  <span style={{ color: m.ok ? theme.text : theme.textLight }}>{m.ok ? `$${(m.proceeds || 0).toFixed(2)}` : '—'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!appleLoading && appleData?.ok && Object.keys(appleData.byProduct || {}).length > 0 && (
+          <div className="mt-3" style={cardStyle}>
+            <p className="text-xs font-medium mb-2" style={{ color: theme.textLight }}>By Product</p>
+            <div className="space-y-1">
+              {Object.entries(appleData.byProduct).map(([id, p]) => (
+                <div key={id} className="flex justify-between text-xs">
+                  <span style={{ color: theme.text }}>{p.title || id}</span>
+                  <span style={{ color: theme.textLight }}>{p.units} units · ${p.proceeds.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <p className="text-xs text-center" style={{ color: theme.textLight, opacity: 0.5 }}>

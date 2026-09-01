@@ -12,7 +12,6 @@ const pushNotifications = require('./pushNotifications');
 const INACTIVE_DAYS = 14;
 const UNREAD_ANNOUNCEMENTS_THRESHOLD = 5;
 const GROUP_BUY_DAYS_BEFORE = 2;
-const RESEARCH_PLUS_WINBACK_DAYS = 90;
 
 /** EasyPost raw status → push template id (granular tracking). */
 function easypostRawToPushTemplate(rawStatus, previousRaw) {
@@ -279,7 +278,11 @@ function getSubscriptionState(user, subDoc) {
   return { sub, status, periodEnd, isTrialing, isPaid, isFree };
 }
 
-/** Subscription lifecycle: expiring soon, free plan, 90-day winback. */
+/** Subscription lifecycle pushes — trial-focused only.
+ *  - researchPlusExpiringSoon: push for trial users at 3 days left (paid → email only)
+ *  - freePlanActive / researchPlusWinback: email only (no push — less naggy)
+ *  Payment-failed stays on push via sendPaymentFailedPush.
+ */
 exports.scheduledSubscriptionLifecyclePush = onSchedule(
   { schedule: '0 10 * * *', timeZone: 'UTC' },
   async () => {
@@ -299,10 +302,11 @@ exports.scheduledSubscriptionLifecyclePush = onSchedule(
         /* ignore */
       }
 
-      const { periodEnd, isTrialing, isPaid, isFree } = getSubscriptionState(user, subDoc);
+      const { periodEnd, isTrialing } = getSubscriptionState(user, subDoc);
 
-      if (periodEnd && (isTrialing || isPaid)) {
-        const daysLeft = Math.ceil((periodEnd - now) / (86400000));
+      // Trial only — paid "ending soon" stays email-side so we don't nag subscribers.
+      if (periodEnd && isTrialing) {
+        const daysLeft = Math.ceil((periodEnd - now) / 86400000);
         if (daysLeft === 3) {
           const type = 'researchPlusExpiringSoon';
           if (!(await wasNotificationSent(userId, type))) {
@@ -316,37 +320,8 @@ exports.scheduledSubscriptionLifecyclePush = onSchedule(
           }
         }
       }
-
-      if (isFree && user.subscriptionEndedAt) {
-        const endedAt = user.subscriptionEndedAt.toDate?.() || new Date(user.subscriptionEndedAt);
-        const daysSinceEnd = Math.floor((now - endedAt) / 86400000);
-        if (daysSinceEnd >= 0 && daysSinceEnd <= 2) {
-          const type = 'freePlanActive';
-          if (!(await wasNotificationSent(userId, type))) {
-            const result = await sendTemplatedPush(userId, 'subscription', type, {}, {
-              path: '/app/account',
-            });
-            if (result.success) {
-              await recordNotificationSent(userId, type);
-              sent++;
-            }
-          }
-        }
-        if (daysSinceEnd >= RESEARCH_PLUS_WINBACK_DAYS && daysSinceEnd < RESEARCH_PLUS_WINBACK_DAYS + 2) {
-          const type = 'researchPlusWinback';
-          if (!(await wasNotificationSent(userId, type))) {
-            const result = await sendTemplatedPush(userId, 'subscription', type, {}, {
-              path: '/app/account',
-            });
-            if (result.success) {
-              await recordNotificationSent(userId, type);
-              sent++;
-            }
-          }
-        }
-      }
     }
-    logger.info(`subscription_lifecycle_push: sent ${sent}`);
+    logger.info(`subscription_lifecycle_push: sent ${sent} (trial expiring only; free/winback email-only)`);
   }
 );
 

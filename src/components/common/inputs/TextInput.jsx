@@ -19,6 +19,8 @@ export default function TextInput({
   customTextColor = null,
   maxLength = null,
   prefix = null,
+  /** When true, hide text prefix until the field is focused or has a value (avoids clashing with placeholder). */
+  hidePrefixUntilActive = false,
   /** Absolute right adornment inside the outlined field (e.g. compact icon picker). Single-line outlined only. */
   suffix = null,
   /** Outlined-only: placeholder-only styling; label kept for accessibility (sr-only). */
@@ -31,6 +33,7 @@ export default function TextInput({
   const safeValue = value != null ? String(value) : '';
   const hasValue = safeValue && safeValue.trim() !== '';
   const isLabelActive = isFocused || hasValue;
+  const showPrefix = !!prefix && (!hidePrefixUntilActive || isFocused || hasValue);
   const useMinimalFloating = !!(outlined && minimalOutline && !multiline);
   const outlinedPlaceholder = useMinimalFloating ? (placeholder ?? label ?? '') : (isLabelActive ? placeholder : ' ');
   return (
@@ -108,7 +111,7 @@ export default function TextInput({
       `}</style>
       {outlined ? (
         <div className="outlined-input-wrapper w-full min-w-0">
-          {prefix && (
+          {showPrefix && (
             <span
               style={{
                 position: 'absolute',
@@ -190,7 +193,7 @@ export default function TextInput({
                 textTransform: uppercase ? 'uppercase' : 'none',
                 overflowWrap: 'break-word',
                 wordBreak: 'break-word',
-                ...(prefix ? { paddingLeft: dense ? '3rem' : '3.5rem' } : {}),
+                ...(showPrefix ? { paddingLeft: dense ? '3rem' : '3.5rem' } : {}),
                 ...(suffix ? { paddingRight: dense ? '3.125rem' : '3.5rem' } : {}),
               }}
             />

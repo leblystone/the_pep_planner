@@ -140,7 +140,7 @@ export default function ActiveProtocolsHomeCard({
                   </div>
                 </button>
 
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {recentFx.length > 0 && (
                     <div className="flex flex-col items-end gap-0.5 max-w-[min(140px,35vw)] sm:max-w-[160px]">
                       {recentFx.slice(0, 2).map((e) => {
@@ -159,28 +159,28 @@ export default function ActiveProtocolsHomeCard({
                     </div>
                   )}
 
-                  <div className="w-px h-6 shrink-0" style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.2)' : `${color}30` }} />
+                  <div className="w-px h-8 shrink-0 mx-0.5" style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.2)' : `${color}30` }} />
 
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onSideEffect?.(p); }}
-                    className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
+                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
                     style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.1)' : `${color}15` }}
                     title={`Log side effect for ${p.protocolName}`}
                   >
-                    <WarningDiamond size={13} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
-                    <span className="text-[8px] font-semibold leading-none" style={{ color: rowTextMuted }}>Side effect</span>
+                    <WarningDiamond size={16} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
+                    <span className="text-[10px] font-semibold leading-none" style={{ color: rowTextMuted }}>Side effect</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onNotes?.(p); }}
-                    className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
+                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
                     style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.1)' : `${color}15` }}
                     title={`Notes for ${p.protocolName}`}
                   >
-                    <PhNote size={13} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
-                    <span className="text-[8px] font-semibold leading-none" style={{ color: rowTextMuted }}>Note</span>
+                    <PhNote size={16} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
+                    <span className="text-[10px] font-semibold leading-none" style={{ color: rowTextMuted }}>Note</span>
                   </button>
                 </div>
               </div>
@@ -191,19 +191,19 @@ export default function ActiveProtocolsHomeCard({
             <button
               type="button"
               onClick={() => onSideEffect?.({ id: null, protocolName: null })}
-              className="flex-1 rounded-xl py-2 text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
+              className="flex-1 rounded-xl py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
               style={{ color: theme.textLight, borderColor: theme.border || 'rgba(0,0,0,0.08)', backgroundColor: 'transparent' }}
             >
-              <WarningDiamond size={11} weight="duotone" />
+              <WarningDiamond size={16} weight="duotone" />
               Side effect
             </button>
             <button
               type="button"
               onClick={() => onNotes?.({ id: null, protocolName: null })}
-              className="flex-1 rounded-xl py-2 text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
+              className="flex-1 rounded-xl py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
               style={{ color: theme.textLight, borderColor: theme.border || 'rgba(0,0,0,0.08)', backgroundColor: 'transparent' }}
             >
-              <PhNote size={11} weight="duotone" />
+              <PhNote size={16} weight="duotone" />
               Notes
             </button>
           </div>

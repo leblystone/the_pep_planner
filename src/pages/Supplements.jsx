@@ -50,9 +50,10 @@ function DeliveryIcon({ delivery, size = 16, color, weight = 'duotone' }) {
  * slotOpen  — active slot is empty, so a held card can be resumed immediately
  * onSwap    — called when user wants to swap this held supplement with the active one
  */
-function SupplementCard({ supplement, theme, onEdit, held = false, slotOpen = false, onSwap }) {
+function SupplementCard({ supplement, theme, onEdit, held = false, slotOpen = false, onSwap, onConfirmStillTaking, onStopTaking }) {
   const simpleMode = useIsSimpleMode();
   const isBuddyOwned = supplement.ownerId && supplement.ownerId !== OWNER_SELF;
+  const needsReconfirm = !held && !!supplement.needsReconfirm;
 
   const schedule = Array.isArray(supplement.schedule) ? supplement.schedule : [];
   const hasAM = schedule.includes('AM');
@@ -84,6 +85,8 @@ function SupplementCard({ supplement, theme, onEdit, held = false, slotOpen = fa
           : (theme.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.95)'),
         border: held
           ? `1px dashed ${theme.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`
+          : needsReconfirm
+            ? `1px solid rgba(245,158,11,0.45)`
           : isBuddyOwned ? `1px solid ${iconCfg.color}55`
           : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
         boxShadow: held ? 'none' : isBuddyOwned ? buddyTint.boxShadow : (theme.isDark ? '0 4px 12px rgba(0,0,0,0.2)' : '0 4px 16px rgba(0,0,0,0.04)'),
@@ -198,12 +201,54 @@ function SupplementCard({ supplement, theme, onEdit, held = false, slotOpen = fa
           </>
         )}
       </div>
+
+      {needsReconfirm && (
+        <div
+          className="relative z-20 mt-2 flex items-center gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <span
+            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+            style={{ backgroundColor: 'rgba(245,158,11,0.14)', color: '#f59e0b' }}
+          >
+            <AlertTriangle size={9} />
+            Reconfirm
+          </span>
+          <button
+            type="button"
+            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: `${theme.primary}22`, color: theme.primary }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onConfirmStillTaking?.(supplement);
+            }}
+          >
+            Still Taking
+          </button>
+          <button
+            type="button"
+            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+            style={{
+              backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+              color: theme.textLight,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStopTaking?.(supplement);
+            }}
+          >
+            Stop
+          </button>
+        </div>
+      )}
     </button>
   );
 }
 
-function MedicationCard({ medication, theme, onEdit }) {
+function MedicationCard({ medication, theme, onEdit, onConfirmStillTaking, onStopTaking }) {
   const simpleMode = useIsSimpleMode();
+  const needsReconfirm = !!medication.needsReconfirm;
   const schedule = Array.isArray(medication.schedule) ? medication.schedule : [];
   const hasAM = schedule.includes('AM');
   const hasPM = schedule.includes('PM');
@@ -220,7 +265,9 @@ function MedicationCard({ medication, theme, onEdit }) {
       className="group relative text-left rounded-[20px] p-3.5 transition-all duration-300 hover:-translate-y-0.5 active:scale-95 flex flex-col justify-between"
       style={{
         backgroundColor: theme.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.95)',
-        border: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
+        border: needsReconfirm
+          ? '1px solid rgba(245,158,11,0.45)'
+          : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`,
         boxShadow: theme.isDark ? '0 4px 12px rgba(0,0,0,0.2)' : '0 4px 16px rgba(0,0,0,0.04)',
         minHeight: '110px',
       }}
@@ -297,6 +344,46 @@ function MedicationCard({ medication, theme, onEdit }) {
           )}
         </div>
       </div>
+
+      {needsReconfirm && (
+        <div
+          className="relative z-20 mt-2 flex items-center gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span
+            className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+            style={{ backgroundColor: 'rgba(245,158,11,0.14)', color: '#f59e0b' }}
+          >
+            <AlertTriangle size={9} />
+            Reconfirm
+          </span>
+          <button
+            type="button"
+            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: `${theme.primary}22`, color: theme.primary }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onConfirmStillTaking?.(medication);
+            }}
+          >
+            Still Taking
+          </button>
+          <button
+            type="button"
+            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+            style={{
+              backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+              color: theme.textLight,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStopTaking?.(medication);
+            }}
+          >
+            Stop
+          </button>
+        </div>
+      )}
     </button>
   );
 }
@@ -439,7 +526,7 @@ export default function Supplements() {
       refreshMedications();
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Medication deleted', type: 'success' } }));
     } else if (data?.id && editingMedication?.id) {
-      updateMedication(data.id, data);
+      updateMedication(data.id, { ...data, needsReconfirm: false });
       refreshMedications();
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Medication updated', type: 'success' } }));
     } else {
@@ -528,7 +615,7 @@ export default function Supplements() {
       await deleteSupplement(supplement.id);
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Supplement deleted', type: 'success' } }));
     } else if (editingSupplement) {
-      await updateSupplement(supplement);
+      await updateSupplement({ ...supplement, needsReconfirm: false });
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Supplement updated', type: 'success' } }));
     } else {
       addSupplement(supplement);
@@ -810,6 +897,34 @@ export default function Supplements() {
                   medication={m}
                   theme={theme}
                   onEdit={handleEditMedication}
+                  onConfirmStillTaking={(med) => {
+                    if (isReadOnly) { setShowUpgrade(true); return; }
+                    const updated = updateMedication(med.id, { needsReconfirm: false });
+                    if (updated) {
+                      setMedications((prev) =>
+                        (prev || []).map((x) => (x.id === med.id ? updated : x))
+                      );
+                    }
+                    window.dispatchEvent(new CustomEvent('tpp:toast', {
+                      detail: { message: 'Medication confirmed', type: 'success' },
+                    }));
+                  }}
+                  onStopTaking={(med) => {
+                    if (isReadOnly) { setShowUpgrade(true); return; }
+                    const updated = updateMedication(med.id, {
+                      needsReconfirm: false,
+                      archived: true,
+                      active: false,
+                    });
+                    if (updated) {
+                      setMedications((prev) =>
+                        (prev || []).map((x) => (x.id === med.id ? updated : x))
+                      );
+                    }
+                    window.dispatchEvent(new CustomEvent('tpp:toast', {
+                      detail: { message: 'Medication stopped', type: 'info' },
+                    }));
+                  }}
                 />
               ))}
             </div>
@@ -1044,6 +1159,25 @@ export default function Supplements() {
                   held={isHeld}
                   slotOpen={isHeld && slotOpen}
                   onSwap={handleSwap}
+                  onConfirmStillTaking={(sup) => {
+                    if (isReadOnly) { setShowUpgrade(true); return; }
+                    updateSupplement({ ...sup, needsReconfirm: false });
+                    window.dispatchEvent(new CustomEvent('tpp:toast', {
+                      detail: { message: 'Supplement confirmed', type: 'success' },
+                    }));
+                  }}
+                  onStopTaking={(sup) => {
+                    if (isReadOnly) { setShowUpgrade(true); return; }
+                    updateSupplement({
+                      ...sup,
+                      needsReconfirm: false,
+                      archived: true,
+                      active: false,
+                    });
+                    window.dispatchEvent(new CustomEvent('tpp:toast', {
+                      detail: { message: 'Supplement archived', type: 'info' },
+                    }));
+                  }}
                 />
               );
             })}

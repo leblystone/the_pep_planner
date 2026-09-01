@@ -3,11 +3,12 @@ import { formatMMDDYYYY } from '../../utils/date'
 import { renderCost as formatCurrency } from '../../utils/currencyUtils'
 import { getCachedTrackingInfo, detectCarrier } from '../../services/tracking'
 import { Truck, ShoppingBag, ClipboardList, ChevronDown, Image as ImageIcon, Link as LinkIcon, Home } from 'lucide-react'
-import { CreditCard, Truck as PhosphorTruck, HouseLine, Storefront, CalendarCheck } from '@phosphor-icons/react'
+import { Storefront, CalendarCheck } from '@phosphor-icons/react'
 import ImagePreviewModal from '../common/ImagePreviewModal'
 import OwnerChip from '../buddy/OwnerChip'
 import { getOrderItemQuantityLabel } from '../../utils/unitConversion'
 import { useIsSimpleMode } from '../../hooks/useIsSimpleMode'
+import OrderStatusProgress, { getOrderStatusStep } from './OrderStatusProgress'
 
 const getNextStatus = (status) => {
   const s = (status || '').toLowerCase();
@@ -19,13 +20,6 @@ const getNextStatus = (status) => {
   }
   return { text: 'Mark as Shipped', icon: <Truck className="h-3 w-3" /> };
 };
-
-function getStatusStep(status) {
-  const s = (status || '').toLowerCase()
-  if (s.includes('deliver')) return 3
-  if (s.includes('ship') || s.includes('transit')) return 2
-  return 1
-}
 
 function accentBarColor(statusToShow, theme) {
   const s = (statusToShow || '').toLowerCase()
@@ -40,71 +34,6 @@ function categoryLabel(order) {
   if (c === 'international') return 'International'
   if (c === 'groupbuy') return 'Group buy'
   return 'Domestic'
-}
-
-function OrderStatusProgress({ step, theme, isDelayed }) {
-  const steps = [
-    { key: 'placed', label: 'Placed', Icon: CreditCard },
-    { key: 'transit', label: 'In transit', Icon: PhosphorTruck },
-    { key: 'delivered', label: 'Delivered', Icon: HouseLine },
-  ]
-  const lineColor = theme.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'
-  const fillColor = theme.primary || '#557755'
-  const muted = theme.textLight || theme.text
-
-  return (
-    <div className="mt-3 mb-0.5" aria-label="Order status progress">
-      <div className="flex items-start w-full">
-        {steps.map((st, idx) => {
-          const n = idx + 1
-          const complete = step >= n
-          const lineComplete = step > n
-          const StepIcon = st.Icon
-          return (
-            <React.Fragment key={st.key}>
-              <div className="flex flex-col items-center w-[4.5rem] sm:w-24 shrink-0">
-                <div
-                  className="flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors duration-200"
-                  style={{
-                    borderColor: complete ? fillColor : lineColor,
-                    backgroundColor: complete ? `${fillColor}22` : 'transparent',
-                    color: complete ? (theme.primaryDark || theme.text) : muted,
-                  }}
-                >
-                  <StepIcon
-                    size={20}
-                    weight="duotone"
-                    aria-hidden
-                    style={{ opacity: complete ? 1 : 0.35 }}
-                  />
-                </div>
-                <span
-                  className="mt-1 text-[9px] font-semibold uppercase tracking-wide text-center leading-tight px-0.5"
-                  style={{ color: complete ? theme.text : muted, opacity: complete ? 1 : 0.65 }}
-                >
-                  {st.label}
-                </span>
-              </div>
-              {idx < steps.length - 1 && (
-                <div className="flex-1 flex items-center pt-[17px] px-0.5 min-w-[8px]">
-                  <div
-                    className="h-0.5 w-full rounded-full transition-colors duration-200"
-                    style={{ backgroundColor: lineComplete ? fillColor : lineColor, opacity: lineComplete ? 0.85 : 1 }}
-                    aria-hidden
-                  />
-                </div>
-              )}
-            </React.Fragment>
-          )
-        })}
-      </div>
-      {isDelayed && (
-        <p className="text-center text-[10px] font-semibold mt-1.5" style={{ color: theme.isDark ? '#fca5a5' : '#dc2626' }}>
-          Delayed
-        </p>
-      )}
-    </div>
-  )
 }
 
 export default function OrderList({ orders = [], theme, onEdit, onAdvance, onDelete, vendors = [], freePlan = false }) {
@@ -154,7 +83,7 @@ export default function OrderList({ orders = [], theme, onEdit, onAdvance, onDel
         const isDelivered = (statusToShow || '').toLowerCase().includes('deliver');
         const isDelayed = (statusToShow || '').toLowerCase().includes('delay');
         const cardOpacity = freePlan && isDelivered ? 0.45 : 1;
-        const step = getStatusStep(statusToShow);
+        const step = getOrderStatusStep(statusToShow);
         const accent = accentBarColor(statusToShow, theme);
         const orderNum = o.publicOrderNumber != null ? String(o.publicOrderNumber) : (o.id || '').slice(0, 8)
 

@@ -102,14 +102,28 @@ export const TEMPLATE_TRIGGER_META = {
     label: 'Morning Research',
     icon: 'bell',
     trigger: 'Around their morning reminder time (local time)',
-    rule: 'They still have unfinished morning research tasks',
+    rule: 'Fires only if they have morning research scheduled. Unfinished → reminder list. All done → “morning research done” ping. Nothing scheduled → silent.',
     prefType: 'researchReminders',
   },
   researchReminderPM: {
     label: 'Evening Research',
     icon: 'bell',
     trigger: 'Around their evening reminder time (local time)',
-    rule: 'They still have unfinished evening research tasks',
+    rule: 'Includes unfinished morning research that wasn’t checked off, plus evening items. Unfinished → reminder list. All done (morning leftovers + evening) → “Research is done for today”. Nothing left and no evening schedule → silent.',
+    prefType: 'researchReminders',
+  },
+  researchReminderAMComplete: {
+    label: 'Morning Research Done',
+    icon: 'bell',
+    trigger: 'At their morning reminder time (when morning list is fully complete)',
+    rule: 'They had morning research scheduled and finished all of it before the reminder window',
+    prefType: 'researchReminders',
+  },
+  researchReminderPMComplete: {
+    label: 'Research Done for Today',
+    icon: 'bell',
+    trigger: 'At their evening reminder time (when today’s list is fully complete)',
+    rule: 'Evening research was scheduled, morning leftovers (if any) are done, and evening items are done',
     prefType: 'researchReminders',
   },
   researchReminderCustom: {
@@ -155,24 +169,10 @@ export const TEMPLATE_TRIGGER_META = {
     prefType: 'engagement',
   },
   researchPlusExpiringSoon: {
-    label: 'Research+ Expiring (3 days)',
+    label: 'Research+ Trial Expiring (3 days)',
     icon: 'billing',
     trigger: 'Subscription status check',
-    rule: 'Their Research+ trial or plan ends in exactly 3 days',
-    prefType: 'subscription',
-  },
-  freePlanActive: {
-    label: 'Moved to Free Plan',
-    icon: 'billing',
-    trigger: 'Subscription status check',
-    rule: 'Their paid plan or trial just ended (within the last couple of days)',
-    prefType: 'subscription',
-  },
-  researchPlusWinback: {
-    label: 'Research+ Win-back',
-    icon: 'billing',
-    trigger: 'Subscription status check',
-    rule: 'About 90 days since their subscription ended',
+    rule: 'Their Research+ trial ends in exactly 3 days (paid renewals are email-only)',
     prefType: 'subscription',
   },
   paymentFailedSoon: {
@@ -473,8 +473,6 @@ export default function NotificationTemplateEditor({ isOpen = false, onClose, th
       groupBuyReminder: { peptideName: 'BPC-157 Group', daysUntil: 2 },
       supportTicketReply: { subject: 'Order question', subjectSuffix: ' (#Z138)' },
       researchPlusExpiringSoon: { daysLeft: 3 },
-      freePlanActive: {},
-      researchPlusWinback: {},
       paymentFailedSoon: {},
     };
     return sampleData[templateType] || {};

@@ -35,8 +35,9 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-export default function AdminShopWaitlist() {
-  const { theme } = useOutletContext();
+export default function AdminShopWaitlist({ embedded = false, theme: themeProp } = {}) {
+  const outlet = useOutletContext();
+  const theme = themeProp || outlet?.theme;
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -136,14 +137,16 @@ export default function AdminShopWaitlist() {
   };
 
   return (
-    <div className="space-y-6 max-w-6xl">
+    <div className={embedded ? 'space-y-5' : 'space-y-6 max-w-6xl'}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
-            <Bell size={22} weight="duotone" style={{ color: theme.primary }} />
-            Notify Me Waitlist
-          </h1>
-          <p className="text-sm mt-1 max-w-2xl" style={{ color: theme.textLight }}>
+          {!embedded && (
+            <h1 className="text-xl font-bold flex items-center gap-2" style={{ color: theme.text }}>
+              <Bell size={22} weight="duotone" style={{ color: theme.primary }} />
+              Notify Me Waitlist
+            </h1>
+          )}
+          <p className={`text-sm max-w-2xl ${embedded ? '' : 'mt-1'}`} style={{ color: theme.textLight }}>
             Customers who signed up on sold-out products. When you restock, click Notify all — or stock updates from 0 will email them automatically.
           </p>
         </div>

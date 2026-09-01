@@ -163,6 +163,12 @@ html, body {
     width: 100% !important;
     max-width: 100% !important;
   }
+
+  /* Web tablet: main-content has no side padding between phone (≤768) and desktop (≥1024) */
+  .main-content:not(.calendar-page):not(.insights-page) {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px)) !important;
+    padding-right: max(1rem, env(safe-area-inset-right, 0px)) !important;
+  }
 }
 
 /* Dashboard grid fixes for all screen sizes */
@@ -170,7 +176,9 @@ html, body {
   gap: 1rem !important;
   width: 100% !important;
   max-width: 100% !important;
-  padding: 0 !important;
+  /* Keep horizontal inset from Tailwind px-* on the grid or its wrapper */
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
   box-sizing: border-box !important;
   overflow-x: hidden !important;
 }

@@ -197,13 +197,14 @@ export default function Calendar() {
   }, [firebaseUser?.email]);
   const [currentDate, setCurrentDate] = useState(new Date())
   const [viewMode, setViewMode] = useState(() => {
-    // Load default view from settings (settings are shared across accounts, so no validation needed)
     try {
       const settings = JSON.parse(localStorage.getItem('tpprover_settings') || '{}');
-      return settings.calendar?.defaultView || 'month';
+      if (settings.calendar?.defaultView) return settings.calendar.defaultView;
     } catch {
-      return 'month';
+      /* use width-based default */
     }
+    if (typeof window !== 'undefined' && window.innerWidth < 640) return 'week';
+    return 'month';
   }) // 'month' | 'week'
   const [activeDay, setActiveDay] = useState(null)
   const [editingNotesFor, setEditingNotesFor] = useState(null)

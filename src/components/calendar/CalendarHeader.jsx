@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { HelpCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { SealQuestion } from '@phosphor-icons/react';
 import ModernTooltip from '../ui/ModernTooltip';
 
 const getTimeOfDay = () => {
@@ -163,13 +164,13 @@ export default function CalendarHeader({ currentDate, weekStart, onPrev, onNext,
         {viewMode === 'month' && onShowIconKey && (
           <button 
             onClick={onShowIconKey}
-            className="absolute right-2 p-2 rounded-full transition-all duration-500 hover:rotate-[360deg] active:scale-90"
+            className="absolute right-2 p-2 rounded-full active:scale-90 hover:opacity-100 transition-opacity"
             style={{
               color: theme.primary,
               opacity: 0.7
             }}
           >
-            <HelpCircle size={18} strokeWidth={2.5} />
+            <SealQuestion size={24} weight="duotone" color={theme.primary} aria-hidden />
           </button>
         )}
       </div>

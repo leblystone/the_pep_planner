@@ -12,13 +12,29 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 function toDateKey(date) {
   if (!date) return null;
   const d = date instanceof Date ? date : (date?.toDate ? date.toDate() : new Date(date));
+  if (Number.isNaN(d.getTime())) return null;
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 /**
+ * @param {string|null} previousKey
+ * @param {string} todayKey
+ * @returns {number|null}
+ */
+function daysBetweenKeys(previousKey, todayKey) {
+  if (!previousKey || !todayKey) return null;
+  const prev = new Date(`${previousKey}T12:00:00`);
+  const today = new Date(`${todayKey}T12:00:00`);
+  if (Number.isNaN(prev.getTime()) || Number.isNaN(today.getTime())) return null;
+  return Math.max(0, Math.round((today.getTime() - prev.getTime()) / MS_PER_DAY));
+}
+
+/**
  * Track engagement: login (streak + active days) or first-time milestones.
+ * For action === 'login', returns gap info so re-engagement can detect 30+ day absences.
  * @param {string} uid - User ID
  * @param {string} action - 'login' | 'firstProtocolCreated' | 'firstOrderAdded' | 'firstStockpileItem' | 'firstCalendarView' | 'onboardingCompleted' | 'sevenDayStreak'
+ * @returns {Promise<{ previousLastActiveDate: string|null, daysSinceLastActive: number|null }|undefined>}
  */
 export async function trackEngagement(uid, action) {
   if (!uid || !action) return;
@@ -28,8 +44,7 @@ export async function trackEngagement(uid, action) {
     const data = snap.exists() ? snap.data() : {};
 
     if (action === 'login') {
-      await updateEngagementForLogin(userRef, data);
-      return;
+      return await updateEngagementForLogin(userRef, data);
     }
 
     if (action === 'firstCalendarView') {
@@ -58,6 +73,9 @@ export async function trackEngagement(uid, action) {
   }
 }
 
+/**
+ * @returns {Promise<{ previousLastActiveDate: string|null, daysSinceLastActive: number|null }>}
+ */
 async function updateEngagementForLogin(userRef, data) {
   const now = new Date();
   const todayKey = toDateKey(now);
@@ -67,13 +85,18 @@ async function updateEngagementForLogin(userRef, data) {
     ? toDateKey(lastActiveRaw)
     : null;
 
+  const gapResult = {
+    previousLastActiveDate: lastActiveKey,
+    daysSinceLastActive: daysBetweenKeys(lastActiveKey, todayKey),
+  };
+
   if (lastActiveKey === todayKey) {
     await updateDoc(userRef, {
       'engagement.loginCount': (engagement.loginCount ?? 0) + 1,
       'engagement.lastActiveDate': toDateKey(now),
       lastActive: serverTimestamp()
     });
-    return;
+    return gapResult;
   }
 
   const yesterday = new Date(now.getTime() - MS_PER_DAY);
@@ -100,6 +123,7 @@ async function updateEngagementForLogin(userRef, data) {
   }
 
   await updateDoc(userRef, updates);
+  return gapResult;
 }
 
 async function setMilestoneOnce(userRef, data, milestoneKey) {

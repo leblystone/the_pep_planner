@@ -20,7 +20,7 @@ function RevokeAndRestoreTrialAction({ user, theme }) {
     try {
       const res = await adminRevokeAndRestoreTrial(user.uid || user.id, reason || 'Refund confirmed — admin manual revocation');
       setResult({ type: 'success', data: res });
-      setTimeout(() => window.location.reload(), 2500);
+      window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId: user.uid || user.id } }));
     } catch (e) {
       setResult({ type: 'error', message: e.message || 'Failed' });
     } finally {
@@ -184,7 +184,7 @@ export default function UserDetailModal({
         await syncFn({ userId: user.uid || user.id });
         if (!cancelled) {
           setAutoSyncStatus('done');
-          setTimeout(() => window.location.reload(), 1500);
+          window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId: user.uid || user.id } }));
         }
       } catch (e) {
         if (!cancelled) setAutoSyncStatus('error');
@@ -209,6 +209,21 @@ export default function UserDetailModal({
   useEffect(() => {
     setBillingUserOverride(null);
     setBillingStripeSyncing(false);
+  }, [user?.uid, user?.id]);
+
+  // Re-fetch profile after any sync button completes — no page reload needed
+  useEffect(() => {
+    const uid = user?.uid || user?.id;
+    if (!uid) return;
+    const handler = async (e) => {
+      if (e.detail?.userId !== uid) return;
+      try {
+        const profile = await getAdminUserProfileViaCallable(uid);
+        if (profile?.subscription) setBillingUserOverride(profile);
+      } catch (_) {}
+    };
+    window.addEventListener('tpp:admin:user-subscription-synced', handler);
+    return () => window.removeEventListener('tpp:admin:user-subscription-synced', handler);
   }, [user?.uid, user?.id]);
 
   useEffect(() => {
@@ -428,7 +443,7 @@ export default function UserDetailModal({
     
     try {
       // No password needed — cloud function verifies admin via Firebase Auth token
-      await createAdminMessage(user.email, oneWayMessage.trim());
+      await createAdminMessage(user.email, oneWayMessage.trim(), { source: 'one-way' });
       setLocalMessage('One-way support message sent successfully! 📨');
       setLocalMessageType('success');
       setOneWayMessage('');
@@ -1748,7 +1763,7 @@ function SyncPlatformButton({ user, theme, platform, label, accent }) {
       const row = data.results?.[platform] || data;
       if (data.success !== false && row.success !== false && !row.error && !row.reason?.includes('no_')) {
         setResult({ type: 'success', message: row.message || `✅ ${label} synced` });
-        setTimeout(() => window.location.reload(), 2000);
+        window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId } }));
       } else {
         setResult({ type: 'error', message: row.error || row.reason || row.note || 'Sync failed' });
       }
@@ -1794,15 +1809,18 @@ function SyncPlatformButton({ user, theme, platform, label, accent }) {
 function SyncAllPlatformsButton({ user, theme }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [result, setResult] = useState(null);
+  const [detail, setDetail] = useState(null);
 
   const handleSync = async () => {
     const userId = user.uid || user.id;
     setIsSyncing(true);
     setResult(null);
+    setDetail(null);
     try {
       const data = await adminRunSubscriptionReconciliation({ platform: 'all', userId });
-      setResult({ type: 'success', message: '✅ Ran Stripe, Google Play, and Apple sync for this user' });
-      setTimeout(() => window.location.reload(), 2000);
+      setResult({ type: 'success', message: '✅ Sync complete' });
+      setDetail(data.results || null);
+      window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId } }));
     } catch (error) {
       setResult({ type: 'error', message: error.message || 'Sync failed' });
     } finally {
@@ -1842,6 +1860,47 @@ function SyncAllPlatformsButton({ user, theme }) {
           {result.message}
         </p>
       )}
+      {detail && (
+        <div className="space-y-1 mt-1">
+          {Object.entries(detail).map(([platform, row]) => {
+            const REASON_LABELS = {
+              no_google_play_token: 'no Play token on file — use Manual Play grant ↓',
+              google_play_api_failed: 'Google Play API call failed',
+              no_stripe_customer: 'not a Stripe customer',
+              no_stripe_subscription: 'no Stripe subscription found',
+              no_apple_subscription: 'no Apple subscription on file',
+              apple_api_failed: 'Apple API call failed',
+            };
+            const hasError = !!row?.error;
+            const synced = (row?.synced ?? 0) > 0 || (row?.normalizedOnly ?? 0) > 0;
+            const label = platform === 'stripe' ? 'Stripe' : platform === 'googleplay' ? 'Google Play' : platform === 'apple' ? 'Apple' : platform;
+            let statusColor = theme.textLight;
+            let msg;
+            if (hasError) {
+              msg = `⚠ ${row.error}`;
+              statusColor = theme.error;
+            } else if (row?.success === true && row?.status) {
+              msg = `✅ Found: ${row.status}${row.logged ? ' — change logged' : ' — no drift'}`;
+              statusColor = theme.success;
+            } else if (row?.success === false && row?.reason) {
+              msg = REASON_LABELS[row.reason] || `no data (${row.reason})`;
+            } else if (synced) {
+              msg = `✅ ${(row.synced ?? row.normalizedOnly ?? 0)} updated`;
+              statusColor = theme.success;
+            } else if (row?.skipped != null) {
+              msg = `no changes (${row.usersScanned ?? 0} scanned)`;
+            } else {
+              msg = row?.note || 'no data returned';
+            }
+            return (
+              <div key={platform} className="flex items-start gap-1.5 text-[10px]" style={{ color: statusColor }}>
+                <span className="font-semibold shrink-0" style={{ minWidth: 72 }}>{label}:</span>
+                <span>{msg}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1871,11 +1930,7 @@ function SyncFromStripeButton({ user, theme, forceRefresh = false }) {
           type: 'success',
           message: `✅ Success! Synced subscription: ${response.data.plan} (${response.data.interval})`
         });
-        
-        // Trigger a refresh after 2 seconds
-        setTimeout(() => {
-          window.location.reload();
-        }, 2000);
+        window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId } }));
       } else {
         setResult({
           type: 'error',
@@ -1944,11 +1999,6 @@ function SyncFromStripeButton({ user, theme, forceRefresh = false }) {
             border: `1px solid ${result.type === 'success' ? theme.success + '40' : theme.error + '40'}`
           }}>
           {result.message}
-          {result.type === 'success' && (
-            <div className="mt-1 text-[10px]" style={{ color: theme.textLight }}>
-              Page will refresh in 2 seconds...
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -1985,7 +2035,7 @@ function SyncAppleIAPButton({ user, theme }) {
         reason: reason || 'Manual admin grant — receipt verification failed after StoreKit purchase',
       });
       setResult({ type: 'success', message: `✅ ${response.data.message}` });
-      setTimeout(() => window.location.reload(), 2000);
+      window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId: user.uid || user.id } }));
     } catch (error) {
       console.error('Apple IAP grant error:', error);
       setResult({ type: 'error', message: error.message || 'Failed to grant Apple IAP subscription' });
@@ -2062,9 +2112,6 @@ function SyncAppleIAPButton({ user, theme }) {
             border: `1px solid ${result.type === 'success' ? theme.success + '40' : theme.error + '40'}`,
           }}>
           {result.message}
-          {result.type === 'success' && (
-            <div className="mt-1 text-[10px]" style={{ color: theme.textLight }}>Page will refresh in 2 seconds…</div>
-          )}
         </div>
       )}
     </div>
@@ -2097,7 +2144,7 @@ function AdminStripeGrantButton({ user, theme }) {
         reason: reason || 'Manual admin grant — Stripe webhook failed after checkout',
       });
       setResult({ type: 'success', message: `✅ ${response.data.message}` });
-      setTimeout(() => window.location.reload(), 2000);
+      window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId: user.uid || user.id } }));
     } catch (error) {
       console.error('Stripe manual grant error:', error);
       setResult({ type: 'error', message: error.message || 'Failed to grant Stripe subscription' });
@@ -2166,9 +2213,6 @@ function AdminStripeGrantButton({ user, theme }) {
             border: `1px solid ${result.type === 'success' ? theme.success + '40' : theme.error + '40'}`,
           }}>
           {result.message}
-          {result.type === 'success' && (
-            <div className="mt-1 text-[10px]" style={{ color: theme.textLight }}>Page will refresh in 2 seconds…</div>
-          )}
         </div>
       )}
     </div>
@@ -2177,16 +2221,17 @@ function AdminStripeGrantButton({ user, theme }) {
 
 // Android (Google Play) Manual Grant Button — for Android users whose IAP webhook failed
 const ANDROID_PRODUCT_OPTIONS = [
-  { value: 'com.thepepplanner.app.researchannual',   label: 'Research+ Annual' },
-  { value: 'com.thepepplanner.app.researchmonthly',  label: 'Research+ Monthly' },
-  { value: 'com.thepepplanner.app.researchlifetime', label: 'Research+ Lifetime' },
+  { value: 'm.thepepplanner.app.researchannual',   label: 'Research+ Annual' },
+  { value: 'm.thepepplanner.app.researchmonthly',  label: 'Research+ Monthly' },
+  { value: 'm.thepepplanner.app.researchlifetime', label: 'Research+ Lifetime' },
 ];
 
 function AdminAndroidGrantButton({ user, theme }) {
   const [isGranting, setIsGranting] = useState(false);
   const [result, setResult] = useState(null);
-  const [selectedProduct, setSelectedProduct] = useState('com.thepepplanner.app.researchannual');
+  const [selectedProduct, setSelectedProduct] = useState('m.thepepplanner.app.researchannual');
   const [reason, setReason] = useState('');
+  const [purchaseToken, setPurchaseToken] = useState('');
 
   const handleGrant = async () => {
     if (!window.confirm(`Manually grant Android plan "${selectedProduct}" to ${user.email || user.uid}? This writes directly to Firestore.`)) return;
@@ -2198,10 +2243,11 @@ function AdminAndroidGrantButton({ user, theme }) {
       const response = await grantFn({
         userId: user.uid || user.id,
         productId: selectedProduct,
+        purchaseToken: purchaseToken.trim() || undefined,
         reason: reason || 'Manual admin grant — Google Play webhook failed after purchase',
       });
       setResult({ type: 'success', message: `✅ ${response.data.message}` });
-      setTimeout(() => window.location.reload(), 2000);
+      window.dispatchEvent(new CustomEvent('tpp:admin:user-subscription-synced', { detail: { userId: user.uid || user.id } }));
     } catch (error) {
       console.error('Android manual grant error:', error);
       setResult({ type: 'error', message: error.message || 'Failed to grant Android subscription' });
@@ -2234,6 +2280,14 @@ function AdminAndroidGrantButton({ user, theme }) {
         ))}
       </select>
 
+      <input
+        type="text"
+        placeholder="Purchase token from Play Console (recommended)"
+        value={purchaseToken}
+        onChange={e => setPurchaseToken(e.target.value)}
+        className="w-full px-3 py-2 rounded-lg text-sm border font-mono"
+        style={{ backgroundColor: theme.cardBackground, borderColor: '#3DDC8460', color: theme.text }}
+      />
       <input
         type="text"
         placeholder="Reason / note (optional)"
@@ -2270,9 +2324,6 @@ function AdminAndroidGrantButton({ user, theme }) {
             border: `1px solid ${result.type === 'success' ? theme.success + '40' : theme.error + '40'}`,
           }}>
           {result.message}
-          {result.type === 'success' && (
-            <div className="mt-1 text-[10px]" style={{ color: theme.textLight }}>Page will refresh in 2 seconds…</div>
-          )}
         </div>
       )}
     </div>
@@ -2319,6 +2370,16 @@ function BillingContextBanner({ user, theme }) {
         Last seen on: <span style={{ color: theme.text, fontWeight: 600 }}>{ctx.deviceLabel}</span>
         <span className="opacity-60"> — device only; billing channel above is what matters for grants.</span>
       </p>
+      {badgeChannel === 'android_native' && (
+        <p className="text-[10px] font-semibold mt-1" style={{ color: '#15803d' }}>
+          To grant Play access manually → expand <em>Subscription fixes</em> below and open <em>Manual Play grant</em>.
+        </p>
+      )}
+      {badgeChannel === 'ios_native' && (
+        <p className="text-[10px] font-semibold mt-1" style={{ color: '#4338ca' }}>
+          To grant App Store access manually → expand <em>Subscription fixes</em> below and open <em>Manual App Store grant</em>.
+        </p>
+      )}
     </div>
   );
 }
@@ -2354,43 +2415,28 @@ function SubscriptionFixesSection({ user, theme, defaultOpen = false }) {
       }
     >
       <SyncAllPlatformsButton user={user} theme={theme} />
+
+      {ctx.store === 'unknown' && (
+        <p className="text-[10px] px-1" style={{ color: theme.textLight }}>
+          Billing source unknown — ask the user which store they purchased from, then use the matching manual grant below if sync doesn't find them.
+        </p>
+      )}
+
+      {/* Manual grants — only needed when sync can't fix it (webhook missed the purchase) */}
       {showStripe && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: theme.textLight }}>
-            Web · Stripe
-          </p>
-          {(hasNoMeaningfulSub || ctx.store === 'stripe' || ctx.store === 'squarespace' || ctx.store === 'none') && (
-            <SyncFromStripeButton user={user} theme={theme} />
-          )}
-          {subscription.stripeCustomerId && (
-            <SyncFromStripeButton user={user} theme={theme} forceRefresh />
-          )}
-          <AdminCollapsibleSection title="Manual Stripe grant" theme={theme} defaultOpen={false}>
-            <AdminStripeGrantButton user={user} theme={theme} />
-          </AdminCollapsibleSection>
-        </div>
+        <AdminCollapsibleSection title="Manual Stripe grant" theme={theme} defaultOpen={ctx.store === 'stripe'}>
+          <AdminStripeGrantButton user={user} theme={theme} />
+        </AdminCollapsibleSection>
       )}
       {showApple && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: theme.textLight }}>
-            iOS · App Store
-          </p>
-          <SyncPlatformButton user={user} theme={theme} platform="apple" label="App Store" accent={theme.info} />
-          <AdminCollapsibleSection title="Manual App Store grant" theme={theme} defaultOpen={false}>
-            <SyncAppleIAPButton user={user} theme={theme} />
-          </AdminCollapsibleSection>
-        </div>
+        <AdminCollapsibleSection title="Manual App Store grant" theme={theme} defaultOpen={ctx.store === 'apple'}>
+          <SyncAppleIAPButton user={user} theme={theme} />
+        </AdminCollapsibleSection>
       )}
       {showAndroid && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: theme.textLight }}>
-            Android · Google Play
-          </p>
-          <SyncPlatformButton user={user} theme={theme} platform="googleplay" label="Google Play" accent={theme.success} />
-          <AdminCollapsibleSection title="Manual Play grant" theme={theme} defaultOpen={false}>
-            <AdminAndroidGrantButton user={user} theme={theme} />
-          </AdminCollapsibleSection>
-        </div>
+        <AdminCollapsibleSection title="Manual Play grant" theme={theme} defaultOpen={ctx.store === 'googleplay'}>
+          <AdminAndroidGrantButton user={user} theme={theme} />
+        </AdminCollapsibleSection>
       )}
     </AdminCollapsibleSection>
   );
@@ -2568,26 +2614,11 @@ function SubscriptionDebugSection({ user, theme }) {
               </div>
             )}
 
-            {/* Sync from Stripe — shown when no sub or provider is stripe */}
-            {(() => {
-              const provider = subscription.paymentProvider || subscription.source;
-              const isStripeProvider = !provider || provider === 'stripe';
-              const hasNoMeaningfulSub =
-                !subscription.status ||
-                Object.keys(subscription).length === 0 ||
-                Object.values(subscription).every(v => v === undefined || v === null);
-              return (isStripeProvider || hasNoMeaningfulSub) && !subscription.adminGranted ? (
-                <div className="mt-2">
-                  <SyncFromStripeButton user={user} theme={theme} />
-                </div>
-              ) : null;
-            })()}
-
-            {/* Always show force-sync when stripeCustomerId is present */}
-            {subscription.stripeCustomerId && (
-              <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${theme.border}` }}>
-                <SyncFromStripeButton user={user} theme={theme} forceRefresh />
-              </div>
+            {/* Sync lives in "Subscription fixes" above — use the Sync All button there */}
+            {(!subscription.status || Object.keys(subscription).length === 0) && (
+              <p className="text-[11px] mt-2 px-1" style={{ color: theme.textLight }}>
+                No subscription data found. Use <strong>Subscription fixes → Sync all stores</strong> above to pull from Stripe, Google Play, or Apple.
+              </p>
             )}
 
           </div>

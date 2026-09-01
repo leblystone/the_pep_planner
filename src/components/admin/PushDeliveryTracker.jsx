@@ -60,11 +60,24 @@ const STATUS_META = {
   skipped: { label: 'Skipped', color: '#f59e0b', Icon: WarningCircle },
 };
 
+/** Friendly labels for internal trigger roots (filter values stay technical). */
+const TRIGGER_ROOT_LABELS = {
+  cron: 'Scheduled',
+  engine: 'Automated',
+  pref: 'User preference',
+  admin: 'Sent by admin',
+};
+
+function triggerRootLabel(root) {
+  if (!root) return 'Unknown';
+  return TRIGGER_ROOT_LABELS[root] || root;
+}
+
 function formatTrigger(trigger) {
   if (!trigger) return 'Unknown';
-  if (trigger.startsWith('cron:')) return `Cron · ${trigger.slice(5)}`;
-  if (trigger.startsWith('engine:')) return `Engine · ${trigger.slice(7)}`;
-  if (trigger.startsWith('pref:')) return `Pref · ${trigger.slice(5)}`;
+  if (trigger.startsWith('cron:')) return `Scheduled · ${trigger.slice(5)}`;
+  if (trigger.startsWith('engine:')) return `Automated · ${trigger.slice(7)}`;
+  if (trigger.startsWith('pref:')) return `Preference · ${trigger.slice(5)}`;
   if (trigger.startsWith('admin')) return `Admin · ${trigger}`;
   return trigger;
 }
@@ -85,31 +98,42 @@ function formatWhen(iso) {
 }
 
 const INITIAL_VISIBLE = 6;
+/** Lookback windows for the delivery log (not a hard row cap). */
+const RANGE_OPTIONS = [
+  { days: 7, label: '7d' },
+  { days: 30, label: '30d' },
+];
 
 export default function PushDeliveryTracker({ theme, embedded = false }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showAll, setShowAll] = useState(false);
+  const [rangeDays, setRangeDays] = useState(7);
   const [searchUid, setSearchUid] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPref, setFilterPref] = useState('all');
   const [filterTrigger, setFilterTrigger] = useState('all');
   const [error, setError] = useState(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  const [fetchedMeta, setFetchedMeta] = useState({ days: 7, limit: 2000 });
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const fn = httpsCallable(getFunctions(undefined, 'us-central1'), 'getPushDeliveryLog');
+      // Always fetch the full lookback window. Status / type / trigger / UID are
+      // applied client-side only — sending them to the server caused a "double
+      // filter" where a refresh while Skipped was selected permanently dropped
+      // Sent/Failed from the local dataset (and zeroed those cards).
       const result = await fn({
-        limit: showAll ? 300 : 100,
-        status: filterStatus,
-        prefType: filterPref,
-        trigger: filterTrigger === 'all' ? null : filterTrigger,
-        userId: searchUid.trim() || null,
+        days: rangeDays,
+        limit: 2000,
       });
       setEntries(result.data?.entries || []);
+      setFetchedMeta({
+        days: result.data?.days || rangeDays,
+        limit: result.data?.limit || 2000,
+      });
     } catch (e) {
       console.error('Push delivery log load failed:', e);
       setError(e.message || 'Failed to load push delivery log');
@@ -122,7 +146,7 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAll]);
+  }, [rangeDays]);
 
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE);
@@ -155,38 +179,25 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
     });
   }, [entries, filterStatus, filterPref, filterTrigger, searchUid]);
 
+  // Status cards stay stable (don't shrink when a status filter is active).
   const stats = useMemo(() => {
-    const sent = filtered.filter((e) => e.status === 'sent').length;
-    const failed = filtered.filter((e) => e.status === 'failed').length;
-    const skipped = filtered.filter((e) => e.status === 'skipped').length;
-    return { total: filtered.length, sent, failed, skipped };
-  }, [filtered]);
+    const uidNeedle = searchUid.trim().toLowerCase();
+    const base = entries.filter((e) => {
+      if (filterPref !== 'all' && e.prefType !== filterPref) return false;
+      if (filterTrigger !== 'all' && !(e.trigger || '').includes(filterTrigger)) return false;
+      if (uidNeedle && !(e.userId || '').toLowerCase().includes(uidNeedle)) return false;
+      return true;
+    });
+    return {
+      total: base.length,
+      sent: base.filter((e) => e.status === 'sent').length,
+      failed: base.filter((e) => e.status === 'failed').length,
+      skipped: base.filter((e) => e.status === 'skipped').length,
+    };
+  }, [entries, filterPref, filterTrigger, searchUid]);
 
   const visibleRows = filtered.slice(0, visibleCount);
   const remainingCount = Math.max(0, filtered.length - visibleCount);
-
-  const statusOptions = [
-    {
-      value: 'all',
-      label: 'All Statuses',
-      icon: <Funnel size={18} weight="duotone" style={{ color: theme.primary }} />,
-    },
-    {
-      value: 'sent',
-      label: 'Sent',
-      icon: <CheckCircle size={18} weight="duotone" style={{ color: '#10b981' }} />,
-    },
-    {
-      value: 'failed',
-      label: 'Failed',
-      icon: <XCircle size={18} weight="duotone" style={{ color: '#ef4444' }} />,
-    },
-    {
-      value: 'skipped',
-      label: 'Skipped',
-      icon: <WarningCircle size={18} weight="duotone" style={{ color: '#f59e0b' }} />,
-    },
-  ];
 
   const typeOptions = [
     {
@@ -213,7 +224,7 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
     },
     ...uniqueTriggers.map((t) => ({
       value: t,
-      label: t,
+      label: triggerRootLabel(t),
       icon: <Lightning size={18} weight="duotone" style={{ color: theme.primary }} />,
     })),
   ];
@@ -261,17 +272,6 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
         <div className="flex flex-nowrap items-center gap-2">
           <div className="flex-1 min-w-0">
             <CustomDropdown
-              value={filterStatus}
-              onChange={setFilterStatus}
-              options={statusOptions}
-              theme={theme}
-              outlined
-              customShadow
-              placeholder="Status…"
-            />
-          </div>
-          <div className="flex-1 min-w-0">
-            <CustomDropdown
               value={filterPref}
               onChange={setFilterPref}
               options={typeOptions}
@@ -294,7 +294,11 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
           </div>
           <button
             type="button"
-            onClick={() => setShowAll((v) => !v)}
+            onClick={() => {
+              const idx = RANGE_OPTIONS.findIndex((r) => r.days === rangeDays);
+              const next = RANGE_OPTIONS[(idx + 1) % RANGE_OPTIONS.length];
+              setRangeDays(next.days);
+            }}
             className="px-3 py-2 rounded-full text-sm font-semibold tracking-wide transition-all hover:brightness-105 active:scale-[0.97] shrink-0 whitespace-nowrap"
             style={{
               backgroundColor: theme.cardBackground || theme.surface,
@@ -302,9 +306,9 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
               border: `1px solid ${theme.border}`,
               boxShadow: pillShadow,
             }}
-            title={showAll ? 'Show 100' : 'Show 300'}
+            title={`Look back ${rangeDays} days (click to toggle 7d / 30d)`}
           >
-            {showAll ? '300' : '100'}
+            {RANGE_OPTIONS.find((r) => r.days === rangeDays)?.label || `${rangeDays}d`}
           </button>
           <button
             type="button"
@@ -326,44 +330,62 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         {[
-          { label: 'Visible', value: stats.total, color: theme.primary, Icon: Eye },
-          { label: 'Sent', value: stats.sent, color: '#10b981', Icon: CheckCircle },
-          { label: 'Failed', value: stats.failed, color: '#ef4444', Icon: XCircle },
-          { label: 'Skipped', value: stats.skipped, color: '#f59e0b', Icon: WarningCircle },
-        ].map(({ label, value, color, Icon }) => (
-          <div
-            key={label}
-            className="rounded-2xl border px-3 py-3 flex items-center gap-3"
-            style={{
-              borderColor: theme.border,
-              backgroundColor: theme.cardBackground || theme.surface,
-              boxShadow: theme.isDark
-                ? '0 4px 16px rgba(0,0,0,0.2)'
-                : '0 4px 16px rgba(47,59,58,0.05)',
-            }}
-          >
-            <div
-              className="flex-shrink-0 p-2 rounded-xl"
-              style={{ backgroundColor: `${color}18` }}
+          { label: 'Visible', value: stats.total, color: theme.primary, Icon: Eye, status: 'all' },
+          { label: 'Sent', value: stats.sent, color: '#10b981', Icon: CheckCircle, status: 'sent' },
+          { label: 'Failed', value: stats.failed, color: '#ef4444', Icon: XCircle, status: 'failed' },
+          { label: 'Skipped', value: stats.skipped, color: '#f59e0b', Icon: WarningCircle, status: 'skipped' },
+        ].map(({ label, value, color, Icon, status }) => {
+          const active = filterStatus === status;
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => setFilterStatus(active && status !== 'all' ? 'all' : status)}
+              className="rounded-2xl border px-3 py-3 flex items-center gap-3 text-left transition-all hover:brightness-105 active:scale-[0.98]"
+              style={{
+                borderColor: active ? color : theme.border,
+                backgroundColor: active
+                  ? `${color}14`
+                  : (theme.cardBackground || theme.surface),
+                boxShadow: theme.isDark
+                  ? '0 4px 16px rgba(0,0,0,0.2)'
+                  : '0 4px 16px rgba(47,59,58,0.05)',
+                outline: active ? `2px solid ${color}` : 'none',
+                outlineOffset: 0,
+                cursor: 'pointer',
+              }}
+              title={
+                status === 'all'
+                  ? 'Show all statuses'
+                  : active
+                    ? `Clear ${label.toLowerCase()} filter`
+                    : `Filter to ${label.toLowerCase()}`
+              }
+              aria-pressed={active}
             >
-              <Icon size={18} weight="duotone" style={{ color }} />
-            </div>
-            <div className="min-w-0">
               <div
-                className="text-[10px] font-semibold uppercase tracking-wider"
-                style={{ color: theme.textLight }}
+                className="flex-shrink-0 p-2 rounded-xl"
+                style={{ backgroundColor: `${color}18` }}
               >
-                {label}
+                <Icon size={18} weight="duotone" style={{ color }} />
               </div>
-              <div
-                className="text-lg font-bold tabular-nums leading-tight mt-0.5"
-                style={{ color: theme.text }}
-              >
-                {value}
+              <div className="min-w-0">
+                <div
+                  className="text-[10px] font-semibold uppercase tracking-wider"
+                  style={{ color: theme.textLight }}
+                >
+                  {label}
+                </div>
+                <div
+                  className="text-lg font-bold tabular-nums leading-tight mt-0.5"
+                  style={{ color: theme.text }}
+                >
+                  {value}
+                </div>
               </div>
-            </div>
-          </div>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       {error && (
@@ -385,7 +407,7 @@ export default function PushDeliveryTracker({ theme, embedded = false }) {
           <span className="font-normal text-[11px]" style={{ color: theme.textLight }}>
             {filtered.length === 0
               ? '0 results'
-              : `Showing ${visibleRows.length} of ${filtered.length}`}
+              : `Showing ${visibleRows.length} of ${filtered.length} · last ${fetchedMeta.days || rangeDays}d`}
           </span>
         </h2>
 

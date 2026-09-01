@@ -20,7 +20,7 @@ This file is the single source of truth for PEP Planner data: Firestore collecti
 | `users` | Auth/profile: email, displayName, createdAt, lastActive, subscription fields, etc. |
 | `userSubscriptions` | Stripe/subscription data per user. |
 | `userPreferences` | Theme, settings, etc. (optional separate store). |
-| `userState` | Onboarding, demo-data flags, etc. |
+| `userState` | Onboarding, demo-data flags, reengagement welcome-back state, etc. |
 | `userdata` | Legacy encrypted user data (password-derived); may coexist with `userData`. |
 | `inviteCodes` | Invite code definitions and usage. |
 | `config` | App config (e.g. `emailWhitelist`, `featureFlags`). |
@@ -72,6 +72,26 @@ The blob saved per user at `userData/{userId}`. Every key below is in `timestamp
 Doc also gets `userId`, `lastUpdated` (server timestamp), and `version` when saved.
 
 ---
+
+
+
+### userState.reengagement
+
+Persisted on `userState/{userId}` (not in `userData` sync blob). Controls the Welcome Back flow after a 30+ day absence.
+
+- **lastGapDate** (string, YYYY-MM-DD) — previous `engagement.lastActiveDate` that triggered the prompt; also the backdate target for protocols/goals.
+- **status** (`'pending'` | `'completed'` | `'declined'`) — remind-later leaves pending; decline suppresses for this gap; a new gap date resets.
+- **promptedAt** (ISO string)
+- **completedAt** (ISO string | null)
+
+### Reconfirm / welcome-back additive fields
+
+- **stockpile[].needsReconfirm** (boolean) — flag after welcome-back refresh; clear via Looks Right or edit.
+- **supplements[].needsReconfirm** (boolean)
+- **medications[].needsReconfirm** (boolean)
+- **scheduledBuys[].needsReconfirm** (boolean)
+- **userGoals[].completedDate** (YYYY-MM-DD) — set when a goal is auto-completed on reengagement.
+- **protocolHistory[].completionStatus** — includes `'ended_reengagement'` when a protocol is closed by the Welcome Back flow.
 
 ## Entity shapes
 

@@ -179,6 +179,7 @@ export function exportUserDataToCSV(data, filename = null) {
     if (entry.completionStatus === 'completed') completionStatus = 'Completed';
     else if (entry.completionStatus === 'active') completionStatus = 'Active';
     else if (entry.completionStatus === 'cancelled') completionStatus = 'Cancelled';
+    else if (entry.completionStatus === 'ended_reengagement') completionStatus = 'Closed on Return';
     else if (entry.endDate) completionStatus = 'Completed';
     else completionStatus = 'Active';
     return {
@@ -454,6 +455,7 @@ export async function exportUserDataToPDF(data, filename = null, theme = null) {
       if (entry.completionStatus === 'completed') completionStatus = 'Completed';
       else if (entry.completionStatus === 'active') completionStatus = 'Active';
       else if (entry.completionStatus === 'cancelled') completionStatus = 'Cancelled';
+      else if (entry.completionStatus === 'ended_reengagement') completionStatus = 'Closed on Return';
       else if (entry.endDate) completionStatus = 'Completed';
       else completionStatus = 'Active';
       return {

@@ -683,7 +683,7 @@ export default function Protocols() {
       
       let completionStatus = 'unknown';
       if (entry.endDate) {
-        if (entry.completionStatus === 'completed' || entry.completionStatus === 'ended_early' || entry.completionStatus === 'rescheduled') {
+        if (entry.completionStatus === 'completed' || entry.completionStatus === 'ended_early' || entry.completionStatus === 'rescheduled' || entry.completionStatus === 'ended_reengagement') {
           completionStatus = entry.completionStatus;
         } else {
           const protocolData = entry.protocolData || {};
@@ -935,29 +935,36 @@ export default function Protocols() {
     return lineage;
   };
 
-  const endProtocol = (protocolToEnd, { reason = 'ended_early' } = {}) => {
-    const today = getLocalDateString();
+  const endProtocol = (protocolToEnd, { reason = 'ended_early', endDateOverride = null, skipFollowUp = false } = {}) => {
+    const today = endDateOverride || getLocalDateString();
     const isReschedule = reason === 'rescheduled';
+    const isReengagement = reason === 'ended_reengagement';
     const protocolEndType = isReschedule ? 'rescheduled' : 'manual';
     const updatedProtocol = { ...protocolToEnd, active: false, endDate: today, endType: protocolEndType };
     updateProtocolWithForceSync(updatedProtocol);
 
     const protocolName = protocolToEnd?.protocolName || protocolToEnd?.name || 'Protocol';
-    window.dispatchEvent(new CustomEvent('tpp:toast', {
-      detail: {
-        message: isReschedule
-          ? `${protocolName} was marked as rescheduled.`
-          : `${protocolName} has been ended.`,
-        type: 'success',
-      },
-    }));
+    if (!skipFollowUp) {
+      window.dispatchEvent(new CustomEvent('tpp:toast', {
+        detail: {
+          message: isReschedule
+            ? `${protocolName} was marked as rescheduled.`
+            : `${protocolName} has been ended.`,
+          type: 'success',
+        },
+      }));
+    }
     
     const activeHistoryEntry = findActiveProtocolHistoryEntry(protocolToEnd.id);
     if (activeHistoryEntry) {
       const expectedEndDate = updatedProtocol.endDate || updatedProtocol.expectedEndDate;
-      let completionStatus = isReschedule ? 'rescheduled' : 'ended_early';
+      let completionStatus = isReschedule
+        ? 'rescheduled'
+        : isReengagement
+          ? 'ended_reengagement'
+          : 'ended_early';
       
-      if (!isReschedule && expectedEndDate) {
+      if (!isReschedule && !isReengagement && expectedEndDate) {
         const expected = new Date(expectedEndDate);
         const actual = new Date(today);
         const diffDays = Math.abs(actual - expected) / (1000 * 60 * 60 * 24);
@@ -994,8 +1001,10 @@ export default function Protocols() {
         lineage: Object.keys(lineage).length > 0 ? lineage : null
       });
       
-      setFollowUpProtocol(protocolToEnd);
-      setFollowUpHistoryId(activeHistoryEntry.id);
+      if (!skipFollowUp) {
+        setFollowUpProtocol(protocolToEnd);
+        setFollowUpHistoryId(activeHistoryEntry.id);
+      }
     }
   };
   

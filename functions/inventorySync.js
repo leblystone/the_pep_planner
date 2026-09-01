@@ -240,33 +240,53 @@ async function decrementStockByPriceId(priceId, qty = 1) {
 async function syncStockToAllPlatforms(productId) {
   const db = admin.firestore();
   const doc = await db.collection('shopProducts').doc(productId).get();
-  if (!doc.exists) return;
+  if (!doc.exists) {
+    return { productId, etsy: null, tiktok: null, error: 'Product not found' };
+  }
+
   const product = doc.data();
   const stock = product.stock || 0;
   const platformIds = product.platformIds || {};
+  const etsyListingId = String(platformIds.etsy || '').trim();
+  const tiktokProductId = String(platformIds.tiktok || '').trim();
   const tokens = await getMarketplaceTokens();
+  const results = { productId, etsy: null, tiktok: null };
 
-  if (platformIds.etsy && tokens.etsy?.accessToken) {
-    try {
-      const etsyToken = await refreshTokenIfNeeded('etsy');
-      await updateEtsyListingStock(String(platformIds.etsy), stock, etsyToken || tokens.etsy);
-      logger.info(`Synced stock to Etsy listing ${platformIds.etsy}: ${stock}`);
-    } catch (err) {
-      logger.error(`Failed to sync to Etsy for ${productId}:`, err);
-    }
-  } else if (platformIds.etsy) {
-    logger.warn(`Skipping Etsy sync for ${productId}: listing ${platformIds.etsy} set but shop not connected`);
-  }
-
-  if (platformIds.tiktok && tokens.tiktok?.accessToken) {
-    try {
-      const tiktokToken = await refreshTokenIfNeeded('tiktok');
-      await updateTikTokProductStock(String(platformIds.tiktok), stock, tiktokToken || tokens.tiktok);
-      logger.info(`Synced stock to TikTok product ${platformIds.tiktok}: ${stock}`);
-    } catch (err) {
-      logger.error(`Failed to sync to TikTok:`, err);
+  if (etsyListingId) {
+    if (!tokens.etsy?.accessToken) {
+      results.etsy = { ok: false, listingId: etsyListingId, error: 'Etsy not connected — connect in Admin → Marketplaces' };
+      logger.warn(`Skipping Etsy sync for ${productId}: shop not connected`);
+    } else {
+      try {
+        const etsyToken = await refreshTokenIfNeeded('etsy');
+        await updateEtsyListingStock(etsyListingId, stock, etsyToken || tokens.etsy);
+        results.etsy = { ok: true, listingId: etsyListingId, stock };
+        logger.info(`Synced stock to Etsy listing ${etsyListingId}: ${stock}`);
+      } catch (err) {
+        results.etsy = { ok: false, listingId: etsyListingId, error: err.message };
+        logger.error(`Failed to sync to Etsy for ${productId}:`, err);
+      }
     }
   }
+
+  if (tiktokProductId) {
+    if (!tokens.tiktok?.accessToken) {
+      results.tiktok = { ok: false, productId: tiktokProductId, error: 'TikTok not connected — connect in Admin → Marketplaces' };
+      logger.warn(`Skipping TikTok sync for ${productId}: shop not connected`);
+    } else {
+      try {
+        const tiktokToken = await refreshTokenIfNeeded('tiktok');
+        await updateTikTokProductStock(tiktokProductId, stock, tiktokToken || tokens.tiktok);
+        results.tiktok = { ok: true, productId: tiktokProductId, stock };
+        logger.info(`Synced stock to TikTok product ${tiktokProductId}: ${stock}`);
+      } catch (err) {
+        results.tiktok = { ok: false, productId: tiktokProductId, error: err.message };
+        logger.error(`Failed to sync to TikTok for ${productId}:`, err);
+      }
+    }
+  }
+
+  return results;
 }
 
 // ---------------------------------------------------------------------------

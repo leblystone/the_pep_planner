@@ -5,7 +5,7 @@ import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverT
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../config/firebase';
 import { COLLECTIONS } from '../../config/collections';
-import { closeSupportTicketFromWorkQueue, updateFeedback, getAdminMessagesHistoryForEmail } from '../../services/firebase';
+import { closeSupportTicketFromWorkQueue, updateFeedback, getAdminMessagesHistoryForEmail, replyToFeedbackViaTicket, subscribeToTicketMessages } from '../../services/firebase';
 import AdminLoader from './AdminLoader';
 import CustomDropdown from '../common/inputs/CustomDropdown';
 import UserReportsInbox from './UserReportsInbox';
@@ -390,7 +390,6 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
   const [commitAuditDays, setCommitAuditDays] = useState(365);
   const [linkingNoMatchSha, setLinkingNoMatchSha] = useState(null);
   const [selectedLogIdForNoMatch, setSelectedLogIdForNoMatch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
   const [selectedQueueItem, setSelectedQueueItem] = useState(null);
   const [selectedUserEmail, setSelectedUserEmail] = useState(null);
   const [fromTheTeamMessages, setFromTheTeamMessages] = useState([]);
@@ -422,6 +421,21 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       setWorkQueue(deduped);
       setCosts(_costsCache);
       setLoading(false);
+
+      // If a ticket was reopened server-side, remove it from the closed cache immediately
+      setClosedQueue((prev) => {
+        if (!prev?.length) return prev;
+        const openTicketIds = new Set(deduped.map((t) => t.ticketId).filter(Boolean));
+        const openLogIds = new Set(deduped.map((t) => t.logId));
+        const next = prev.filter(
+          (t) => !(openLogIds.has(t.logId) || (t.ticketId && openTicketIds.has(t.ticketId)))
+        );
+        if (next.length === prev.length) return prev;
+        _wqClosedCache = next;
+        _saveClosedCache(next);
+        setClosedCountHint((hint) => (typeof hint === 'number' ? Math.max(0, hint - (prev.length - next.length)) : hint));
+        return next;
+      });
 
       // One-time backfill: assign adminStatus to old tickets that had replies but no status set
       if (!_backfillRan) {
@@ -540,19 +554,17 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     return () => unsubscribe();
   }, []);
 
-  // Live messages — all tickets for the selected user, merged chronologically
+  // Live messages — ALL tickets for the selected user (support + feedback-linked), one timeline
   useEffect(() => {
     setAllMessages([]);
-    const userEmail = selectedUserEmail;
-    if (!userEmail) return;
-
-    // All support tickets in the queue (pending + completed) for this user
-    const userTickets = workQueueRef.current.filter(
-      t => t.userEmail?.trim().toLowerCase() === userEmail && t.ticketId
-    );
-    if (userTickets.length === 0) return;
+    const userEmail = selectedUserEmail?.trim().toLowerCase();
+    if (!userEmail) return undefined;
 
     const messagesByTicket = new Map();
+    const subscribed = new Set();
+    const unsubscribers = [];
+    let cancelled = false;
+
     const tsToMs = (ts) => {
       if (!ts) return 0;
       if (ts.toMillis) return ts.toMillis();
@@ -561,35 +573,92 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       return 0;
     };
     const rebuild = () => {
+      if (cancelled) return;
       const flat = [];
       for (const msgs of messagesByTicket.values()) flat.push(...msgs);
       flat.sort((a, b) => tsToMs(a.createdAt) - tsToMs(b.createdAt));
       setAllMessages(flat);
     };
 
-    const unsubscribers = userTickets.map((ticket) => {
-      const messagesRef = collection(db, 'supportTickets', ticket.ticketId, 'messages');
+    const subscribeTicket = (ticketId, meta = {}) => {
+      if (!ticketId || subscribed.has(ticketId)) return;
+      subscribed.add(ticketId);
+      const messagesRef = collection(db, 'supportTickets', ticketId, 'messages');
       const q = query(messagesRef, orderBy('createdAt', 'asc'));
-      return onSnapshot(
-        q,
-        (snapshot) => {
-          messagesByTicket.set(ticket.ticketId, snapshot.docs.map(d => ({
-            id: d.id,
-            ...d.data(),
-            _ticketId: ticket.ticketId,
-            _ticketNumber: ticket.ticketNumber || ticket.ticketId.slice(-6).toUpperCase(),
-            _ticketType: ticket.type || 'support',
-            _ticketStatus: ticket.adminStatus || 'open',
-          })));
-          rebuild();
-        },
-        (err) => console.error('Error loading ticket messages:', err)
+      unsubscribers.push(
+        onSnapshot(
+          q,
+          (snapshot) => {
+            messagesByTicket.set(
+              ticketId,
+              snapshot.docs.map((d) => ({
+                id: d.id,
+                ...d.data(),
+                _ticketId: ticketId,
+                _ticketNumber: meta.ticketNumber || ticketId.slice(-6).toUpperCase(),
+                _ticketType: meta.type || meta.ticketType || 'support',
+                _ticketStatus: meta.status || meta.adminStatus || 'open',
+                _feedbackId: meta.feedbackId || null,
+              }))
+            );
+            rebuild();
+          },
+          (err) => console.error('Error loading ticket messages:', err)
+        )
       );
-    });
+    };
 
-    return () => unsubscribers.forEach(fn => fn());
+    // Queue logs (open + closed)
+    for (const t of [...(workQueueRef.current || []), ...(closedQueue || [])]) {
+      if (t.userEmail?.trim().toLowerCase() !== userEmail || !t.ticketId) continue;
+      subscribeTicket(t.ticketId, {
+        ticketNumber: t.ticketNumber,
+        type: t.type || t.ticketType || 'support',
+        status: t.status,
+        adminStatus: t.adminStatus,
+      });
+    }
+
+    // Feedback docs with linked tickets
+    for (const f of feedbackItems || []) {
+      const email = (f._email || f.userEmail || '').trim().toLowerCase();
+      if (email !== userEmail) continue;
+      const tid = f.linkedTicketId;
+      if (!tid) continue;
+      const typeRaw = String(f._type || f.type || 'bug').toLowerCase();
+      subscribeTicket(tid, {
+        ticketNumber: tid.slice(-6).toUpperCase(),
+        type: typeRaw.includes('suggest') ? 'suggestion' : 'bug',
+        status: f._status || f.status,
+        feedbackId: f.id,
+      });
+    }
+
+    // Authoritative: every supportTickets doc for this email
+    let cancelledQuery = false;
+    getDocs(query(collection(db, 'supportTickets'), where('userEmail', '==', userEmail)))
+      .then((snap) => {
+        if (cancelled || cancelledQuery) return;
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          subscribeTicket(d.id, {
+            ticketNumber: data.ticketNumber,
+            type: data.type || 'support',
+            status: data.status,
+            feedbackId: data.feedbackId || null,
+          });
+        });
+      })
+      .catch((err) => console.warn('Could not list user tickets for blend:', err?.message));
+
+    return () => {
+      cancelled = true;
+      cancelledQuery = true;
+      unsubscribers.forEach((fn) => fn());
+    };
+  // Re-run when queue/feedback sets change so newly linked tickets join the blend
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUserEmail]);
+  }, [selectedUserEmail, workQueue, closedQueue, feedbackItems]);
 
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -808,6 +877,14 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     setFromTheTeamMessages([]);
   };
 
+  /** Back to the Open User Reports list (clears conversation + user selection). */
+  const returnToReportsList = useCallback(() => {
+    closeModal();
+    setSelectedUserEmail(null);
+    clearSelectedUser();
+    setShowHistory(false);
+  }, [clearSelectedUser]);
+
   const getMs = (ts) => {
     if (!ts) return 0;
     if (typeof ts === 'number') return ts;
@@ -1012,11 +1089,7 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     return counts;
   }, [allUnifiedItems]);
 
-  const filteredItems = useMemo(() => {
-    if (typeFilter === 'all') return allUnifiedItems;
-    if (typeFilter === 'unread') return allUnifiedItems.filter((item) => item.unread);
-    return allUnifiedItems.filter((item) => item.typeCategory === typeFilter);
-  }, [allUnifiedItems, typeFilter]);
+  const filteredItems = allUnifiedItems;
 
   const ticketIdDeepLink = searchParams.get('ticketId');
   const deepLinkHandled = useRef(false);
@@ -1092,8 +1165,8 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       if (i.kind === 'feedback') return i.raw?.id === selectedQueueItem.raw?.id;
       return i.raw?.logId === selectedQueueItem.raw?.logId;
     });
-    if (!still) closeModal();
-  }, [allUnifiedItems, selectedQueueItem]);
+    if (!still) returnToReportsList();
+  }, [allUnifiedItems, selectedQueueItem, returnToReportsList]);
 
   // Keep selectedQueueItem.unread in sync when underlying data updates
   useEffect(() => {
@@ -1113,20 +1186,45 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     }
   }, [allUnifiedItems, selectedQueueItem]);
 
-  // Load historical "From the Team" pushes when viewing a suggestion/bug
+  // Load conversation for suggestion/bug: ticket thread when linked, else legacy From the Team
   useEffect(() => {
     if (selectedQueueItem?.kind !== 'feedback') {
       setFromTheTeamMessages([]);
       setFromTheTeamLoading(false);
       return undefined;
     }
+    const fb = selectedQueueItem.raw?._rawFeedback || {};
+    const linkedTicketId = fb.linkedTicketId || selectedQueueItem.raw?.ticketId || null;
     const email = selectedQueueItem.email?.trim();
-    if (!email) {
-      setFromTheTeamMessages([]);
-      return undefined;
-    }
     let cancelled = false;
     setFromTheTeamLoading(true);
+
+    if (linkedTicketId) {
+      // Live ticket thread (unified inbox)
+      const unsub = subscribeToTicketMessages(linkedTicketId, (msgs) => {
+        if (cancelled) return;
+        const mapped = (msgs || []).map((m, i) => ({
+          id: m.id || `tm-${i}`,
+          message: m.message || m.text || '',
+          createdAt: m.createdAt,
+          userEmail: email,
+          senderType: m.senderType,
+          seededFromFeedback: Boolean(m.seededFromFeedback),
+        }));
+        setFromTheTeamMessages(mapped);
+        setFromTheTeamLoading(false);
+      });
+      return () => {
+        cancelled = true;
+        if (typeof unsub === 'function') unsub();
+      };
+    }
+
+    if (!email) {
+      setFromTheTeamMessages([]);
+      setFromTheTeamLoading(false);
+      return undefined;
+    }
     getAdminMessagesHistoryForEmail(email)
       .then((msgs) => {
         if (!cancelled) setFromTheTeamMessages(Array.isArray(msgs) ? msgs : []);
@@ -1139,7 +1237,13 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         if (!cancelled) setFromTheTeamLoading(false);
       });
     return () => { cancelled = true; };
-  }, [selectedQueueItem?.kind, selectedQueueItem?.email, selectedQueueItem?.raw?.id]);
+  }, [
+    selectedQueueItem?.kind,
+    selectedQueueItem?.email,
+    selectedQueueItem?.raw?.id,
+    selectedQueueItem?.raw?._rawFeedback?.linkedTicketId,
+    selectedQueueItem?.raw?.ticketId,
+  ]);
 
   const handleSendReplyUnified = async () => {
     if (!selectedQueueItem || !customMessage.trim()) return;
@@ -1147,10 +1251,16 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       setSending(true);
       const sentText = customMessage.trim();
       try {
-        const ok = await onFeedbackReply?.(selectedQueueItem.raw._rawFeedback, sentText);
-        if (ok === false) return;
+        const fb = selectedQueueItem.raw?._rawFeedback || selectedQueueItem.raw;
+        const result = await (onFeedbackReply
+          ? onFeedbackReply(fb, sentText)
+          : replyToFeedbackViaTicket(fb, sentText).then(() => true));
+        if (result === false) return;
+        const ticketId =
+          (typeof result === 'object' && result?.ticketId) ||
+          fb?.linkedTicketId ||
+          null;
         setCustomMessage('');
-        // Optimistically show the reply in the DM frame before feedback reload lands
         setSelectedQueueItem((prev) => {
           if (!prev || prev.kind !== 'feedback') return prev;
           const rawFb = prev.raw?._rawFeedback || {};
@@ -1161,17 +1271,20 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
             feedbackStatus: 'reviewed',
             raw: {
               ...prev.raw,
+              ticketId: ticketId || prev.raw?.ticketId || null,
               _feedbackStatus: 'reviewed',
               _rawFeedback: {
                 ...rawFb,
                 status: 'reviewed',
                 adminResponse: sentText,
                 responseDate: new Date(),
+                linkedTicketId: ticketId || rawFb.linkedTicketId || null,
                 adminReplies: [...prior, nextReply],
               },
             },
           };
         });
+        // Optimistic bubble until ticket subscription catches up
         setFromTheTeamMessages((prev) => [
           ...prev,
           {
@@ -1179,37 +1292,90 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
             message: sentText,
             createdAt: new Date(),
             userEmail: selectedQueueItem.email,
+            senderType: 'admin',
           },
         ]);
-        // Refresh persisted history (non-blocking)
-        const email = selectedQueueItem.email?.trim();
-        if (email) {
-          getAdminMessagesHistoryForEmail(email)
-            .then((msgs) => setFromTheTeamMessages(Array.isArray(msgs) ? msgs : []))
-            .catch(() => {});
-        }      } catch (err) {
+      } catch (err) {
         window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: err?.message || 'Failed to send', type: 'error' } }));
       } finally {
         setSending(false);
       }
     } else {
+      const ticketId = selectedTicket?.ticketId || selectedQueueItem?.raw?.ticketId;
+      if (!ticketId) {
+        window.dispatchEvent(new CustomEvent('tpp:toast', {
+          detail: {
+            message: 'This report isn’t linked to a support ticket, so the reply can’t be sent.',
+            type: 'error',
+          },
+        }));
+        return;
+      }
       await sendMessage();
     }
   };
 
   const handleCloseFromPanel = async () => {
-    if (!selectedQueueItem) return;
+    if (!selectedQueueItem && !selectedUserEmail) return;
     setClosingTicket(true);
     try {
-      if (selectedQueueItem.kind === 'feedback') {
-        const fb = feedbackDocFromQueueItem(selectedQueueItem);
-        if (onFeedbackMarkResolved && fb?.id) await onFeedbackMarkResolved(fb);
-      } else {
-        await closeTicket();
+      const email = (selectedUserEmail || selectedQueueItem?.email || '').trim().toLowerCase();
+      if (!email) return;
+
+      // Close every open report for this user (support + feedback), not just the selected one.
+      const groupItems = (allUnifiedItems || []).filter(
+        (i) => (i.email || '').trim().toLowerCase() === email
+      );
+      if (groupItems.length === 0) {
+        window.dispatchEvent(new CustomEvent('tpp:toast', {
+          detail: { message: 'No open reports to close for this user', type: 'info' },
+        }));
         return;
       }
-      closeModal();
-      setCloseArmed(false);
+
+      const closedTicketIds = new Set();
+      let closedCount = 0;
+
+      for (const item of groupItems) {
+        if (item.kind === 'feedback') {
+          const fb = feedbackDocFromQueueItem(item);
+          if (fb?.id && onFeedbackMarkResolved) {
+            await onFeedbackMarkResolved(fb);
+            closedCount += 1;
+          }
+          continue;
+        }
+
+        const ticket = item.raw;
+        if (!ticket?.logId) continue;
+        const tid = ticket.ticketId || null;
+
+        // One cloud close per ticketId; still mark any extra log rows locally.
+        if (tid && closedTicketIds.has(tid)) {
+          await updateDoc(doc(db, COLLECTIONS.USER_REPORTS_QUEUE, ticket.logId), {
+            markedFixed: true,
+            markedFixedAt: serverTimestamp(),
+            ...(adminNotes ? { adminNotes } : {}),
+          });
+          applyClosedToLocalQueue(ticket);
+          closedCount += 1;
+          continue;
+        }
+
+        await closeTicketInline(ticket, null, { silent: true, notes: adminNotes });
+        if (tid) closedTicketIds.add(tid);
+        closedCount += 1;
+      }
+
+      returnToReportsList();
+      window.dispatchEvent(new CustomEvent('tpp:toast', {
+        detail: {
+          message: closedCount > 1
+            ? `Closed ${closedCount} reports for this user`
+            : 'Closed this user’s report',
+          type: 'success',
+        },
+      }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: err?.message || 'Failed', type: 'error' } }));
     } finally {
@@ -1492,15 +1658,34 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
 
   const sendMessage = async () => {
     if (!selectedTicket || !customMessage.trim()) return;
-    
+
+    const ticketId = String(
+      selectedTicket.ticketId ||
+      selectedQueueItem?.raw?.ticketId ||
+      selectedQueueItem?.raw?._rawFeedback?.linkedTicketId ||
+      ''
+    ).trim();
+    if (!ticketId) {
+      window.dispatchEvent(new CustomEvent('tpp:toast', {
+        detail: {
+          message: 'This report isn’t linked to a support ticket, so the reply can’t be sent.',
+          type: 'error',
+        },
+      }));
+      return;
+    }
+
+    const logId = selectedTicket.logId || selectedQueueItem?.raw?.logId || null;
+    const sentText = customMessage.trim();
+
     setSending(true);
     try {
       const firestore = getFirestore();
-      const messagesRef = collection(firestore, 'supportTickets', selectedTicket.ticketId, 'messages');
-      
+      const messagesRef = collection(firestore, 'supportTickets', ticketId, 'messages');
+
       await addDoc(messagesRef, {
-        message: customMessage.trim(),
-        text: customMessage.trim(),
+        message: sentText,
+        text: sentText,
         senderType: 'admin',
         senderName: 'The Pep Planner Team',
         senderEmail: 'support@thepepplanner.com',
@@ -1508,31 +1693,37 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         sentVia: 'work-queue'
       });
 
-      const ticketRef = doc(firestore, 'supportTickets', selectedTicket.ticketId);
+      const ticketRef = doc(firestore, 'supportTickets', ticketId);
       await updateDoc(ticketRef, {
         lastMessageAt: serverTimestamp(),
         lastAdminMessageAt: serverTimestamp(),
         status: 'in-progress'
       });
 
-      const logRef = doc(db, COLLECTIONS.USER_REPORTS_QUEUE, selectedTicket.logId);
-      await updateDoc(logRef, {
-        followUpSent: true,
-        followUpMessage: customMessage.trim(),
-        followUpAt: serverTimestamp()
-      });
+      if (logId) {
+        const logRef = doc(db, COLLECTIONS.USER_REPORTS_QUEUE, logId);
+        await updateDoc(logRef, {
+          followUpSent: true,
+          followUpMessage: sentText,
+          followUpAt: serverTimestamp()
+        });
 
-      setWorkQueue(prev => prev.map(t => 
-        t.logId === selectedTicket.logId 
-          ? { ...t, followUpSent: true, followUpMessage: customMessage.trim() } 
-          : t
+        setWorkQueue(prev => prev.map(t =>
+          t.logId === logId
+            ? { ...t, followUpSent: true, followUpMessage: sentText }
+            : t
+        ));
+      }
+
+      setSelectedTicket(prev => (prev
+        ? { ...prev, ticketId, followUpSent: true, followUpMessage: sentText }
+        : prev
       ));
-      setSelectedTicket(prev => ({ ...prev, followUpSent: true, followUpMessage: customMessage.trim() }));
 
       window.dispatchEvent(new CustomEvent('tpp:toast', {
         detail: { message: 'Message sent! 📨', type: 'success' }
       }));
-      
+
       setCustomMessage('');
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -1551,14 +1742,34 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     try {
       // 1. Call cloud function if ticketId is available (updates supportTickets doc)
       if (selectedTicket.ticketId) {
+        let cfOk = false;
         try {
           await closeSupportTicketFromWorkQueue(
             selectedTicket.ticketId,
             selectedTicket.logId,
             adminNotes
           );
+          cfOk = true;
         } catch (cfErr) {
           console.warn('[closeTicket] cloud function failed, falling back to direct Firestore update:', cfErr);
+        }
+
+        // Always patch the user-facing ticket doc — admin rules allow this even if CF partially failed
+        try {
+          await updateDoc(doc(db, 'supportTickets', selectedTicket.ticketId), {
+            status: 'closed',
+            closedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            userReadAt: null,
+            customerReopened: false,
+            reopenedByUser: false,
+          });
+        } catch (ticketErr) {
+          if (!cfOk) {
+            console.error('[closeTicket] supportTickets update failed:', ticketErr);
+            throw ticketErr;
+          }
+          console.warn('[closeTicket] supportTickets update failed after CF success:', ticketErr);
         }
       }
 
@@ -1582,7 +1793,7 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       applyClosedToLocalQueue(selectedTicket);
 
       const closed = { ticketId: selectedTicket.ticketId, ticketNumber: selectedTicket.ticketNumber };
-      closeModal();
+      returnToReportsList();
       setJustClosedTicket(closed);
       window.dispatchEvent(new CustomEvent('tpp:toast', {
         detail: { message: `#${selectedTicket.ticketNumber} closed`, type: 'success' }
@@ -1656,19 +1867,23 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     setClosedCountHint((c) => (typeof c === 'number' ? c + 1 : c));
   };
 
-  const closeTicketInline = async (ticket, e) => {
+  const closeTicketInline = async (ticket, e, options = {}) => {
     if (e) {
       e.stopPropagation();
       e.preventDefault();
     }
+    const silent = options.silent === true;
+    const notes = typeof options.notes === 'string' ? options.notes : '';
     if (!ticket?.logId) {
-      window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Cannot close: missing queue log id', type: 'error' } }));
+      if (!silent) {
+        window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Cannot close: missing queue log id', type: 'error' } }));
+      }
       return;
     }
     try {
       if (ticket.ticketId) {
         try {
-          await closeSupportTicketFromWorkQueue(ticket.ticketId, ticket.logId, '');
+          await closeSupportTicketFromWorkQueue(ticket.ticketId, ticket.logId, notes);
         } catch (cfErr) {
           console.warn('[closeTicketInline] cloud close failed, updating logs in Firestore:', cfErr);
         }
@@ -1678,6 +1893,7 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       await updateDoc(logRef, {
         markedFixed: true,
         markedFixedAt: serverTimestamp(),
+        ...(notes ? { adminNotes: notes } : {}),
       });
 
       if (ticket.ticketId) {
@@ -1691,10 +1907,15 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       }
 
       applyClosedToLocalQueue(ticket);
-      window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: `#${ticket.ticketNumber} closed`, type: 'success' } }));
+      if (!silent) {
+        window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: `#${ticket.ticketNumber} closed`, type: 'success' } }));
+      }
     } catch (err) {
       console.error('[closeTicketInline] failed:', err);
-      window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: err?.message || 'Failed to close', type: 'error' } }));
+      if (!silent) {
+        window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: err?.message || 'Failed to close', type: 'error' } }));
+      }
+      throw err;
     }
   };
 
@@ -1896,11 +2117,9 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
   const isFeedbackSelected = selectedQueueItem?.kind === 'feedback';
 
   return (
-    <div style={{ padding: '0', maxWidth: '100%', margin: '0 auto' }}>
+    <div style={{ padding: 0, width: '100%', maxWidth: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', flex: 1, boxSizing: 'border-box' }}>
       <UserReportsInbox
         theme={t}
-        typeFilter={typeFilter}
-        setTypeFilter={setTypeFilter}
         typeCounts={typeCounts}
         showHistory={showHistory}
         setShowHistory={setShowHistory}

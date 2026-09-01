@@ -9,7 +9,7 @@ import AdminMessageModal from './AdminMessageModal';
 import { uploadImageToStorage } from '../../utils/storageUtils';
 import { publicFaqCategories, inAppGuides, getAllFaqEntries, appRoadmap } from '../../data/faqContent';
 import { useSupportInbox } from '../../hooks/useSupportInbox';
-import { adminMessageSnippet } from '../../utils/supportInbox';
+import { adminMessageSnippet, isTicketOpen } from '../../utils/supportInbox';
 
 const MODAL_SPRING = { type: 'spring', stiffness: 420, damping: 34, mass: 0.85 };
 const STEP_EASE = { duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] };
@@ -91,11 +91,15 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     const [selectedImages, setSelectedImages] = useState([]); // Array of {file: File, preview: string}
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStatus, setSubmitStatus] = useState(null);
-    const [userTickets, setUserTickets] = useState([]);
-    const [loadingTickets, setLoadingTickets] = useState(false);
-    const [showPreviousTickets, setShowPreviousTickets] = useState(false);
+    // Live ticket list from inbox subscription (no separate fetch needed)
+    const liveTickets = useMemo(() => inboxTickets ?? [], [inboxTickets]);
     const [showHistoryChat, setShowHistoryChat] = useState(false);
     const [showAdminMessage, setShowAdminMessage] = useState(false);
+
+    // When the open ticket is closed server-side, drop back to the hub (not a live DM).
+    useEffect(() => {
+        if (!hasOpenRequest) setShowHistoryChat(false);
+    }, [hasOpenRequest]);
     const [helpQuery, setHelpQuery] = useState('');
     const [helpTab, setHelpTab] = useState('guides'); // 'guides' | 'faq' | 'roadmap'
     const [openHelpKey, setOpenHelpKey] = useState(null);
@@ -232,32 +236,13 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
         }
     }, [user?.email, open]);
 
-    // Load user's previous tickets when modal opens
+    // Load user's previous tickets when modal opens — inbox subscription is primary; this is a one-time refresh fallback.
     useEffect(() => {
-        if (open && user?.email) {
-            loadUserTickets();
-        }
-    }, [open, user?.email]);
-
-    // Prefer live inbox tickets when available
-    useEffect(() => {
-        if (inboxTickets?.length) {
-            setUserTickets(inboxTickets);
-        }
-    }, [inboxTickets]);
-
-    const loadUserTickets = async () => {
-        if (!user?.email) return;
-        setLoadingTickets(true);
-        try {
-            const tickets = await getUserTickets(user.email);
-            setUserTickets(tickets);
-        } catch (error) {
+        if (!open || !user?.email) return;
+        getUserTickets(user.email).catch((error) => {
             console.error('❌ Failed to load user tickets:', error);
-        } finally {
-            setLoadingTickets(false);
-        }
-    };
+        });
+    }, [open, user?.email]);
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -400,7 +385,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                         /* ignore */
                     }
                 }
-                if (user?.email) await loadUserTickets();
+                if (user?.email) window.dispatchEvent(new CustomEvent('tpp:support-inbox-changed'));
                 window.dispatchEvent(new CustomEvent('tpp:support-inbox-changed'));
             }
             
@@ -448,18 +433,19 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     // Open request → that thread only. Full archive only when user asks for history.
     const chatTickets = useMemo(() => {
         if (showHistoryChat) {
-            return userTickets.length ? userTickets : (chatTicket ? [chatTicket] : []);
+            return liveTickets.length ? liveTickets : [];
         }
-        if (openSupportTicket) return [openSupportTicket];
-        if (chatTicket) return [chatTicket];
+        if (openSupportTicket && isTicketOpen(openSupportTicket)) {
+            return [openSupportTicket];
+        }
         return [];
-    }, [showHistoryChat, openSupportTicket, userTickets, chatTicket]);
+    }, [showHistoryChat, openSupportTicket, liveTickets]);
 
     const pastTicketCount = useMemo(() => {
-        if (!userTickets.length) return 0;
-        if (!openSupportTicket) return userTickets.length;
-        return userTickets.filter((t) => t.id !== openSupportTicket.id).length;
-    }, [userTickets, openSupportTicket]);
+        if (!liveTickets.length) return 0;
+        if (!openSupportTicket) return liveTickets.length;
+        return liveTickets.filter((t) => t.id !== openSupportTicket.id).length;
+    }, [liveTickets, openSupportTicket]);
 
     // Let inbox nudge know the Support surface is already open (skip redundant toasts)
     useEffect(() => {
@@ -711,7 +697,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                         );
                                                     })}
 
-                                                    {(pastTicketCount > 0 || (!hasOpenRequest && userTickets.length > 0)) && !showHistoryChat && (
+                                                    {(pastTicketCount > 0 || (!hasOpenRequest && liveTickets.length > 0)) && !showHistoryChat && (
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowHistoryChat(true)}
@@ -960,7 +946,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                     </button>
                                                 </form>
 
-                                                {user?.email && userTickets.length > 0 && (
+                                                {user?.email && liveTickets.length > 0 && (
                                                     <div
                                                         className="pt-4 mt-5"
                                                         style={{ borderTop: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` }}
@@ -972,7 +958,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                                 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] opacity-50 hover:opacity-80 transition-opacity"
                                                                 style={{ color: theme.text }}
                                                             >
-                                                                <span>Previous ({userTickets.length})</span>
+                                                                <span>Previous ({liveTickets.length})</span>
                                                                 <span>{showPreviousTickets ? '−' : '+'}</span>
                                                             </button>
                                                             <button
@@ -991,7 +977,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                         </div>
                                                         {showPreviousTickets && (
                                                             <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                                {userTickets.map((ticket) => (
+                                                                {liveTickets.map((ticket) => (
                                                                     <button
                                                                         key={ticket.id}
                                                                         type="button"

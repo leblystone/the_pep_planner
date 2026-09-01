@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { toKey } from './MonthGrid'
-import { User } from '@phosphor-icons/react'
+import { Person } from '@phosphor-icons/react'
 import { Pill, PenTool, Beaker, Target, CheckCircle, Check, ShoppingCart, Pipette, ChevronDown, ChevronUp, Calendar, Building, MapPin, Users, DollarSign, FileText, Star, HeartPulse, Sun, Moon, X, PenLine, Edit, Timer } from 'lucide-react'
 import { isTaskCompleted, generateTaskId, toggleTaskCompletion } from '../../utils/taskCompletion'
 import TaskDisplay from './TaskDisplay'
@@ -16,6 +16,7 @@ import { getSideEffectsForDate } from '../../utils/sideEffectsLog';
 import { getProtocolAccentHex, hexToRgba } from '../../utils/protocolColors';
 import Modal from '../common/Modal';
 import InjectionHistoryModal from '../common/InjectionHistoryModal';
+import { getWashoutPeriodProgress, getHalfLifeRemainingPct } from '../../utils/washoutDisplay';
 import SideEffectsQuickSheet from '../sideeffects/SideEffectsQuickSheet';
 const colorMap = penColors.reduce((acc, c) => ({ ...acc, [c.hex.toLowerCase()]: c.name }), {});
 
@@ -860,6 +861,7 @@ export default function WeekView({ startDate, entries, scheduled, theme, onDayCl
                   const name = isObj ? w.name : w;
                   const hasHalfLife = isObj && w.halfLives && w.halfLives.length > 0;
                   const barColor = theme.isDark ? 'rgba(200,122,92,0.75)' : '#c87a5c';
+                  const { pct: periodPct, daysLeft } = isObj ? getWashoutPeriodProgress(w) : { pct: 0, daysLeft: 0 };
                   return (
                     <div
                       key={wIdx}
@@ -879,25 +881,25 @@ export default function WeekView({ startDate, entries, scheduled, theme, onDayCl
                           </div>
                         )}
                       </div>
-                      {hasHalfLife && (
+                      {isObj && w.totalDays > 0 && (
                         <div className="px-1 pb-1 space-y-0.5">
-                          {w.halfLives.map((hl, hlIdx) => {
-                            const hlHours = hl.unit === 'days' ? hl.value * 24 : hl.value;
-                            const elapsedHours = w.dayIndex * 24;
-                            const remaining = Math.pow(0.5, elapsedHours / hlHours);
-                            const pct = Math.round(remaining * 100);
+                          <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(200,122,92,0.12)' }}>
+                            <div className="h-full rounded-full" style={{
+                              width: `${Math.max(periodPct > 0 ? 2 : 0, periodPct)}%`,
+                              background: `linear-gradient(90deg, ${barColor} 0%, ${barColor}80 60%, ${barColor}30 100%)`
+                            }} />
+                          </div>
+                          <div className="flex justify-between mt-0.5 text-[8px]" style={{ color: theme.textLight }}>
+                            <span>{periodPct}%</span>
+                            <span>{daysLeft === 0 ? 'last day' : `${daysLeft}d left`}</span>
+                          </div>
+                          {hasHalfLife && w.halfLives.map((hl, hlIdx) => {
+                            const remainingPct = getHalfLifeRemainingPct(w.dayIndex, hl);
+                            if (remainingPct == null) return null;
                             return (
-                              <div key={hlIdx} className="min-w-0">
-                                <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(200,122,92,0.12)' }}>
-                                  <div className="h-full rounded-full" style={{
-                                    width: `${Math.max(2, pct)}%`,
-                                    background: `linear-gradient(90deg, ${barColor} 0%, ${barColor}80 60%, ${barColor}30 100%)`
-                                  }} />
-                                </div>
-                                <div className="flex justify-between mt-0.5 text-[8px]" style={{ color: theme.textLight }}>
-                                  <span>~{pct}%</span>
-                                  <span>{hl.value}{hl.unit === 'days' ? 'd' : 'h'}</span>
-                                </div>
+                              <div key={hlIdx} className="text-[8px] leading-tight truncate text-center" style={{ color: theme.textLight }} title={hl.name}>
+                                {w.halfLives.length > 1 && <span className="font-medium">{hl.name}: </span>}
+                                ~{remainingPct}% left · {hl.value}{hl.unit === 'days' ? 'd' : 'h'} t½
                               </div>
                             );
                           })}
@@ -937,7 +939,7 @@ export default function WeekView({ startDate, entries, scheduled, theme, onDayCl
             }}
             title="Injection site history (this week)"
           >
-            <User size={12} weight="bold" className="flex-shrink-0" aria-hidden />
+            <Person size={16} weight="duotone" color={theme.primary} className="flex-shrink-0" aria-hidden />
             Site history
           </button>
         </div>

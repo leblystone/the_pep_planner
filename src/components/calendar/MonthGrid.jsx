@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { formatMMDDYYYY } from '../../pages/../utils/date'
-import { Pill, ShoppingCart, TestTube, CheckCircle, PenNib, Syringe, SprayBottle, HandPalm, FileText, Flag } from '@phosphor-icons/react'
+import { Pill, ShoppingCart, TestTube, CheckCircle, PenNib, Syringe, SprayBottle, HandPalm, FileText, Flag, Heartbeat } from '@phosphor-icons/react'
 import { isTaskCompleted, generateTaskId } from '../../utils/taskCompletion'
 import { getChromeGradient } from '../../utils/recon'
 import { penColors } from '../../utils/penColors'
 import { areWashoutIconsEnabled, areGroupBuysEnabled } from '../../utils/featureSettings'
 import { getNotesForDate } from '../../utils/protocolHistory'
 import { getCalendarNoteText } from '../../utils/calendarNotesMigration'
+import { loadSideEffects } from '../../utils/sideEffectsLog'
+import BadgeBump from '../ui/BadgeBump'
 
 // Helper function to get supplement icon based on delivery method
 function getSupplementIcon(delivery, className = "h-3 w-3") {
@@ -48,6 +50,94 @@ function getPeptideDeliveryIcon(item, className = "h-3 w-3") {
         }
     }
     return <Syringe className={className} weight="duotone" />;
+}
+
+function doseCountBubbleStyle(theme) {
+    return {
+        backgroundColor: theme?.isDark
+            ? (theme.secondary || 'rgba(160, 180, 153, 0.18)')
+            : (theme.secondary || '#EFF2EE'),
+        color: theme?.primaryDark || theme?.primary || '#5F7F76',
+        border: `1.5px solid ${theme?.isDark
+            ? `${theme.primaryLight || theme.primary}40`
+            : `${theme.primaryLight || theme.primary}55`}`,
+        boxShadow: theme?.isDark ? '0 1px 2px rgba(0,0,0,0.35)' : '0 1px 2px rgba(95, 127, 118, 0.12)',
+    };
+}
+
+function ActivityIconWithCount({ count, theme, badgeClassName = '-top-2 -right-2.5', children }) {
+    if (!count) return null;
+    return (
+        <div className="relative inline-flex items-center justify-center">
+            {children}
+            {count > 1 && (
+                <BadgeBump
+                    count={count}
+                    max={99}
+                    className={`absolute ${badgeClassName} pointer-events-none text-[11px] sm:text-xs font-bold`}
+                    style={{
+                        ...doseCountBubbleStyle(theme),
+                        minWidth: 20,
+                        height: 20,
+                        paddingLeft: 4,
+                        paddingRight: 4,
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+function DoseIconGroup({ peptideDoseCount, supplementDoseCount, buyCount, groupBuysEnabled, theme, iconColor, className = '' }) {
+    const totalDoseCount = peptideDoseCount + supplementDoseCount;
+    const hasIcons = peptideDoseCount > 0 || supplementDoseCount > 0 || (groupBuysEnabled && buyCount > 0);
+    if (!hasIcons) return null;
+
+    return (
+        <div className={`flex flex-col items-center gap-0.5 ${className}`}>
+            <div className="flex items-center justify-center gap-1">
+                {peptideDoseCount > 0 && (
+                    <Syringe size={24} weight="duotone" style={{ color: iconColor }} />
+                )}
+                {supplementDoseCount > 0 && (
+                    <Pill size={24} weight="duotone" style={{ color: iconColor }} />
+                )}
+                {groupBuysEnabled && buyCount > 0 && (
+                    <ShoppingCart size={24} weight="duotone" style={{ color: iconColor }} />
+                )}
+            </div>
+            {totalDoseCount > 1 && (
+                <span
+                    className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums leading-none"
+                    style={doseCountBubbleStyle(theme)}
+                >
+                    {totalDoseCount}
+                </span>
+            )}
+        </div>
+    );
+}
+
+function DayIndicatorBadge({ theme, title, children, variant = 'neutral' }) {
+    const sideFxAccent = theme.primaryDark || theme.primary || '#5F7F76';
+    const isSideFx = variant === 'sideFx';
+
+    return (
+        <span
+            className="inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 rounded border leading-none"
+            style={isSideFx ? {
+                backgroundColor: theme.isDark ? `${sideFxAccent}28` : `${sideFxAccent}20`,
+                borderColor: theme.isDark ? `${sideFxAccent}45` : `${sideFxAccent}35`,
+            } : {
+                backgroundColor: theme.isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
+                borderColor: theme.isDark ? 'rgba(255,255,255,0.15)' : '#d1d5db',
+                color: theme.isDark ? theme.text : '#1f2937',
+            }}
+            title={title}
+        >
+            {children}
+        </span>
+    );
 }
 
 function getMonthDays(date) {
@@ -114,30 +204,30 @@ function MetricIndicator({ metric, theme }) {
 
 /** Desktop month cells: fixed name caps by breakpoint (no height-based jitter). */
 function useMonthCellDisplayLimits() {
-  const [limits, setLimits] = useState({ nameLimit: 0, compactOverflowAt: 3 });
+  const [nameLimit, setNameLimit] = useState(0);
 
   useEffect(() => {
     const update = () => {
       const w = window.innerWidth;
       if (w < 1024) {
-        setLimits({ nameLimit: 0, compactOverflowAt: w < 640 ? 2 : 3 });
+        setNameLimit(0);
         return;
       }
-      let nameLimit = 3;
-      if (w >= 1536) nameLimit = 4;
-      setLimits({ nameLimit, compactOverflowAt: 0 });
+      setNameLimit(w >= 1536 ? 4 : 3);
     };
     update();
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
 
-  return limits;
+  return nameLimit;
 }
 
 export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayClick, theme, protocolTimelines = [], calendarBump = 0, todayPulse = false, planChangeDayKey = null, planChangeTitle = '' }) {
   const [forceRender, setForceRender] = useState(0);
-  const { nameLimit, compactOverflowAt } = useMonthCellDisplayLimits();
+  const [sideEffects, setSideEffects] = useState(() => loadSideEffects());
+  const nameLimit = useMonthCellDisplayLimits();
+  const sideFxAccent = theme.primaryDark || theme.primary || '#5F7F76';
   
   // Listen for task completion events to force re-render
   useEffect(() => {
@@ -151,6 +241,12 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
     return () => {
       window.removeEventListener('tpp:task-completion-changed', handleTaskCompletionChange);
     };
+  }, []);
+
+  useEffect(() => {
+    const refreshSideEffects = () => setSideEffects(loadSideEffects());
+    window.addEventListener('tpp:side-effects-updated', refreshSideEffects);
+    return () => window.removeEventListener('tpp:side-effects-updated', refreshSideEffects);
   }, []);
   
   const days = Array.isArray(getMonthDays(date)) ? getMonthDays(date) : [];
@@ -195,18 +291,19 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                     const key = d ? toKey(d) : ''
                     const entryText = d && entries[key] ? 
                         getCalendarNoteText(entries, key).slice(0, 40) : ''
+                    const daySideEffects = d ? sideEffects.filter((e) => e.date === key) : []
                     const sched = (d && scheduled[key]) || {}
                     const peptides = Array.from(new Set([
                         ...(sched.bySlot?.AM?.peptides || []), 
                         ...(sched.bySlot?.PM?.peptides || [])
                     ]))
-                    const peptideCount = peptides.length
-                    const suppCount = sched.supplements?.length || 0
-                    // Get all supplements from bySlot to determine delivery methods
                     const allSupplements = [
                         ...(sched.bySlot?.AM?.supplements || []),
                         ...(sched.bySlot?.PM?.supplements || [])
                     ];
+                    const peptideDoseCount = (sched.bySlot?.AM?.peptides?.length || 0) + (sched.bySlot?.PM?.peptides?.length || 0);
+                    const supplementDoseCount = allSupplements.length;
+                    const hasWashout = showWashoutIcons && sched.washout && sched.washout.length > 0;
                     // Get unique delivery methods for icon display
                     const deliveryMethods = [...new Set(allSupplements.map(s => typeof s === 'object' ? s.delivery : 'oral'))];
                     const primaryDelivery = deliveryMethods[0] || 'oral';
@@ -268,7 +365,7 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                     // Determine if all tasks are completed
                     const allTasksCompleted = totalTasks > 0 && completedTasks === totalTasks;
                     
-                    const hasActivity = peptideCount > 0 || suppCount > 0 || buyCount > 0 || totalGoals > 0;
+                    const hasActivity = peptideDoseCount > 0 || supplementDoseCount > 0 || buyCount > 0 || totalGoals > 0;
                     const isToday = d && new Date().toDateString() === d.toDateString();
                     
                     const iconColor = theme.isDark ? '#a8b5a0' : '#73796D';
@@ -278,13 +375,11 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                     const allTaskNames = [...new Set([...peptideNames, ...supplementNames])];
                     const visibleTaskNames = nameLimit > 0 ? allTaskNames.slice(0, nameLimit) : [];
                     const hiddenTaskCount = Math.max(0, allTaskNames.length - visibleTaskNames.length);
-                    const showCompactOverflow = nameLimit === 0 && compactOverflowAt > 0 && allTaskNames.length > compactOverflowAt;
-                    const compactHiddenCount = showCompactOverflow ? allTaskNames.length - compactOverflowAt : 0;
                     const showDesktopNames = nameLimit > 0 && allTaskNames.length > 0;
                     const showDesktopIconsOnly = nameLimit > 0 && !showDesktopNames && hasActivity;
 
                     return (
-                        <button key={i} className={`p-1 sm:p-2 md:p-3 rounded-lg text-left hover:shadow-md transition-all duration-200 flex flex-col relative h-full min-h-0 overflow-hidden ${allTasksCompleted ? 'opacity-60' : ''} ${isToday && todayPulse ? 'animate-pulse' : ''}`} style={{ 
+                        <button key={i} className={`p-1 sm:p-2 md:p-3 rounded-lg text-left hover:shadow-md transition-all duration-200 flex flex-col relative h-full min-h-0 overflow-hidden ${allTasksCompleted ? 'opacity-60' : ''} ${isToday && todayPulse ? 'animate-pulse' : ''} ${hasWashout ? 'max-sm:shadow-[inset_0_0_0_1.5px_rgba(200,122,92,0.28)]' : ''}`} style={{ 
                             border: isToday 
                               ? `1.5px solid ${theme.isDark ? theme.primary + '50' : theme.primary + '45'}`
                               : `1px solid ${allTasksCompleted ? (theme.isDark ? '#4b5563' : '#D1D5DB') : theme.border}`,
@@ -329,7 +424,7 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                                     </div>
                                 )}
                                 {d && (
-                                    <div className="absolute top-1 right-1">
+                                    <div className="absolute top-1 right-1 hidden sm:block">
                                         {allTasksCompleted ? (
                                             <CheckCircle 
                                                 size={14}
@@ -351,36 +446,39 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                                 {/* Icons under the number */}
                                 {d && (
                                     <>
-                                        {/* Mobile: 2x2 grid under the number */}
-                                        <div className="grid grid-cols-2 grid-rows-2 gap-0.5 w-8 h-8 sm:hidden mx-auto">
-                                            {peptideCount > 0 && (
-                                                <div className="flex items-center justify-center">
-                                                    <Syringe size={13} weight="duotone" style={{ color: iconColor }} />
-                                                </div>
-                                            )}
-                                            {suppCount > 0 && (
-                                                <div className="flex items-center justify-center">
-                                                    <Pill size={13} weight="duotone" style={{ color: iconColor }} />
-                                                </div>
-                                            )}
-                                            {buyCount > 0 && groupBuysEnabled && (
-                                                <div className="flex items-center justify-center">
-                                                    <ShoppingCart size={13} weight="duotone" style={{ color: iconColor }} />
-                                                </div>
-                                            )}
-                                        </div>
-                                        {/* Tablet: icon row */}
-                                        <div className="hidden sm:flex justify-center lg:hidden items-center gap-1 sm:gap-1.5">
-                                            {peptideCount > 0 && <Syringe className="w-3 h-3" weight="duotone" style={{ color: iconColor }} />}
-                                            {suppCount > 0 && <Pill className="w-3 h-3" weight="duotone" style={{ color: iconColor }} />}
-                                            {buyCount > 0 && groupBuysEnabled && <ShoppingCart className="w-3 h-3" weight="duotone" style={{ color: iconColor }} />}
-                                        </div>
+                                        <DoseIconGroup
+                                            peptideDoseCount={peptideDoseCount}
+                                            supplementDoseCount={supplementDoseCount}
+                                            buyCount={buyCount}
+                                            groupBuysEnabled={groupBuysEnabled}
+                                            theme={theme}
+                                            iconColor={iconColor}
+                                            className="sm:hidden mx-auto mt-1 py-0.5"
+                                        />
+                                        {/* Tablet: same grouped icons + combined total */}
+                                        <DoseIconGroup
+                                            peptideDoseCount={peptideDoseCount}
+                                            supplementDoseCount={supplementDoseCount}
+                                            buyCount={buyCount}
+                                            groupBuysEnabled={groupBuysEnabled}
+                                            theme={theme}
+                                            iconColor={iconColor}
+                                            className="hidden sm:flex lg:hidden mx-auto mt-1 py-0.5"
+                                        />
                                         {/* Desktop fallback when day has activity but no task labels */}
                                         {showDesktopIconsOnly && (
-                                            <div className="hidden lg:flex justify-center items-center gap-1.5 mt-1">
-                                                {peptideCount > 0 && <Syringe className="w-3.5 h-3.5" weight="duotone" style={{ color: iconColor }} />}
-                                                {suppCount > 0 && <Pill className="w-3.5 h-3.5" weight="duotone" style={{ color: iconColor }} />}
-                                                {buyCount > 0 && groupBuysEnabled && <ShoppingCart className="w-3.5 h-3.5" weight="duotone" style={{ color: iconColor }} />}
+                                            <div className="hidden lg:flex justify-center items-center gap-2 mt-1">
+                                                <ActivityIconWithCount count={peptideDoseCount} theme={theme} badgeClassName="-top-1.5 -right-2.5">
+                                                    <Syringe className="w-5 h-5" weight="duotone" style={{ color: iconColor }} />
+                                                </ActivityIconWithCount>
+                                                <ActivityIconWithCount count={supplementDoseCount} theme={theme} badgeClassName="-top-1.5 -right-2.5">
+                                                    <Pill className="w-5 h-5" weight="duotone" style={{ color: iconColor }} />
+                                                </ActivityIconWithCount>
+                                                {groupBuysEnabled && (
+                                                    <ActivityIconWithCount count={buyCount} theme={theme} badgeClassName="-top-1.5 -right-2.5">
+                                                        <ShoppingCart className="w-5 h-5" weight="duotone" style={{ color: iconColor }} />
+                                                    </ActivityIconWithCount>
+                                                )}
                                             </div>
                                         )}
                                     </>
@@ -420,39 +518,54 @@ export default function MonthGrid({ date, entries = {}, scheduled = {}, onDayCli
                                     </div>
                                 )}
 
-                                <div className="mt-auto flex-shrink-0">
-                                {/* Tablet/mobile: hint when day has more than fits */}
-                                {showCompactOverflow && (
-                                    <p
-                                        className="lg:hidden text-center text-[7px] sm:text-[8px] leading-tight truncate px-0.5 mb-0.5"
-                                        style={{ color: theme.textLight }}
-                                        title="Open this day for the full schedule"
-                                    >
-                                        +{compactHiddenCount} more · tap day
-                                    </p>
-                                )}
-
-                                {/* Bottom indicators row - washout left, note right */}
-                                {(showWashoutIcons && sched.washout && sched.washout.length > 0) || entryText ? (
-                                    <div className="flex items-end gap-1">
-                                        {/* Washout indicator - left side */}
-                                        {showWashoutIcons && sched.washout && sched.washout.length > 0 && (
-                                            <span className="inline-flex items-center justify-center w-4 h-4 text-[8px] sm:text-[9px] rounded border border-gray-300 text-gray-800 bg-gray-200 font-bold leading-none" title={`Washout: ${sched.washout.map(w => typeof w === 'object' && w !== null ? w.name : w).join(', ')}`}>
-                                                W
-                                            </span>
-                                        )}
-                                        
-                                        {/* Spacer to push note to right */}
-                                        <span className="flex-1" />
-                                        
-                                        {/* Note indicator - right side */}
+                                <div className="mt-auto flex-shrink-0 w-full min-w-0">
+                                {/* Bottom indicators — side effects & notes on mobile; washout badge tablet+ */}
+                                {(daySideEffects.length > 0 || entryText) && (
+                                    <div className="flex items-center justify-center gap-2 max-w-full min-w-0 sm:hidden py-0.5">
                                         {entryText && (
-                                            <span className="inline-flex items-center justify-center w-4 h-4 text-[8px] sm:text-[9px] rounded border border-gray-300 text-gray-800 bg-gray-200 font-bold leading-none" title={entryText}>
-                                                <FileText size={10} weight="bold" />
-                                            </span>
+                                            <FileText
+                                                size={18}
+                                                weight="duotone"
+                                                style={{ color: iconColor }}
+                                                title={entryText}
+                                            />
+                                        )}
+                                        {daySideEffects.length > 0 && (
+                                            <Heartbeat
+                                                size={18}
+                                                weight="duotone"
+                                                style={{ color: sideFxAccent }}
+                                                title={`Side effects (${daySideEffects.length}): ${daySideEffects.map((e) => e.label || e.effect).join(', ')}`}
+                                            />
                                         )}
                                     </div>
-                                ) : null}
+                                )}
+                                {(hasWashout || daySideEffects.length > 0 || entryText) && (
+                                    <div className="hidden sm:flex flex-wrap items-center justify-start gap-1.5 max-w-full min-w-0">
+                                        {hasWashout && (
+                                            <DayIndicatorBadge
+                                                theme={theme}
+                                                title={`Washout: ${sched.washout.map(w => typeof w === 'object' && w !== null ? w.name : w).join(', ')}`}
+                                            >
+                                                <span className="text-[9px] sm:text-[10px] font-bold leading-none">W</span>
+                                            </DayIndicatorBadge>
+                                        )}
+                                        {entryText && (
+                                            <DayIndicatorBadge theme={theme} title={entryText}>
+                                                <FileText className="w-2.5 h-2.5 sm:w-3 sm:h-3" weight="bold" />
+                                            </DayIndicatorBadge>
+                                        )}
+                                        {daySideEffects.length > 0 && (
+                                            <DayIndicatorBadge
+                                                theme={theme}
+                                                variant="sideFx"
+                                                title={`Side effects (${daySideEffects.length}): ${daySideEffects.map((e) => e.label || e.effect).join(', ')}`}
+                                            >
+                                                <Heartbeat className="w-2.5 h-2.5 sm:w-3 sm:h-3" weight="duotone" style={{ color: sideFxAccent }} />
+                                            </DayIndicatorBadge>
+                                        )}
+                                    </div>
+                                )}
                                 </div>
                             </div>
                         </button>

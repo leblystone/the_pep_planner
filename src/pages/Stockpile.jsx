@@ -1423,10 +1423,11 @@ export default function Stockpile() {
     }
     
     // Add/update timestamps for modified items using prepareItemForSave
+    // Editing quantities also clears any welcome-back reconfirm flag
     const cleanedWithTimestamps = cleanedWithName.map(item => {
       const isNew = !item.createdAt;
       return prepareItemForSave(
-        { ...item, createdAt: item.createdAt || new Date().toISOString() },
+        { ...item, createdAt: item.createdAt || new Date().toISOString(), needsReconfirm: false },
         { isNew }
       );
     });
@@ -1881,6 +1882,26 @@ export default function Stockpile() {
                           if (isReadOnly) { setShowUpgradeModal(true); return; }
                           handleCardRenameConfirm(groupName, newName, newIconId);
                         }}
+                        onConfirmLooksRight={(group) => {
+                          if (isReadOnly) { setShowUpgradeModal(true); return; }
+                          const ids = new Set(
+                            Object.values(group.variants || {})
+                              .flatMap((v) => v.items || [])
+                              .filter((i) => i?.needsReconfirm)
+                              .map((i) => i.id)
+                          );
+                          if (ids.size === 0) return;
+                          setItems((prev) =>
+                            prev.map((item) =>
+                              ids.has(item.id)
+                                ? prepareItemForSave({ ...item, needsReconfirm: false })
+                                : item
+                            )
+                          );
+                          window.dispatchEvent(new CustomEvent('tpp:toast', {
+                            detail: { message: 'Quantity confirmed', type: 'success' },
+                          }));
+                        }}
                         onViewDetails={() => {
                           if (isReadOnly) {
                             setShowUpgradeModal(true);
@@ -2302,6 +2323,19 @@ export default function Stockpile() {
                     theme={theme}
                     onEdit={(s) => { setEditingSupply(s); setShowAddSupply(true); }}
                     onDelete={(s) => setDeleteSupplyItem(s)}
+                    onConfirmLooksRight={(s) => {
+                      if (isReadOnly) { setShowUpgradeModal(true); return; }
+                      setItems((prev) =>
+                        prev.map((item) =>
+                          item.id === s.id
+                            ? prepareItemForSave({ ...item, needsReconfirm: false })
+                            : item
+                        )
+                      );
+                      window.dispatchEvent(new CustomEvent('tpp:toast', {
+                        detail: { message: 'Quantity confirmed', type: 'success' },
+                      }));
+                    }}
                   />
                   </div>
                 ))}
@@ -2329,15 +2363,16 @@ export default function Stockpile() {
         editSupply={editingSupply}
         onSave={(supplyItem) => {
           if (isReadOnly) { setShowUpgradeModal(true); return; }
+          const cleared = prepareItemForSave({ ...supplyItem, needsReconfirm: false });
           setItems(prev => {
-            const exists = prev.some(i => i.id === supplyItem.id);
+            const exists = prev.some(i => i.id === cleared.id);
             return exists
-              ? prev.map(i => i.id === supplyItem.id ? supplyItem : i)
-              : [supplyItem, ...prev];
+              ? prev.map(i => i.id === cleared.id ? cleared : i)
+              : [cleared, ...prev];
           });
           window.dispatchEvent(new CustomEvent('tpp:toast', {
             detail: {
-              message: editingSupply ? `✅ ${supplyItem.name} updated!` : `✅ ${supplyItem.name} added to supplies!`,
+              message: editingSupply ? `✅ ${cleared.name} updated!` : `✅ ${cleared.name} added to supplies!`,
               type: 'success'
             }
           }));

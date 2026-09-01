@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, startTransition } from 'react';
+import React, { useState, useEffect, useRef, useMemo, startTransition } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Apple, Play as LucidePlay } from 'lucide-react';
 import {
@@ -37,6 +37,7 @@ import LandingHeader from '../components/layout/LandingHeader';
 import { isNative, isPWAInstalled, isIOS, APP_STORE_IOS_URL } from '../utils/platform';
 import { usePageSEO } from '../utils/pageSEO';
 import { LANDING_CAROUSEL_COVERS } from '../data/landingCarouselCovers';
+import { buildDecayCurve, getLevelAtTime } from '../utils/halfLife';
 
 const LANDING_PAGE_BG = '#D7E0D9';
 /** Paper Pep Planners — light warm greige section wash */
@@ -323,123 +324,101 @@ function ReconstitutionMathWidget() {
 
 /* ─── WashoutFlowGraphWidget ────────────────────────────────────────────── */
 /**
- * Two-dose PK curve modelled on a ~7-day half-life compound dosed weekly.
- * — Dose 1 at u=0, decays to ~50% by u=7 (one half-life)
- * — Dose 2 at u=7, stacks 100 new units on ~50 remaining → peak ~150
- * — Second washout from ~150 with same 7-day HL → ~5% by u=35
- * Y_MAX = 160 so the chart has headroom above the stacked peak.
+ * Landing demo of Insights → Half-Life “Current Status” decay row.
+ * Visuals match CompoundDecayRow (AnalyticsDashboard); auto-demo moves the “Now”
+ * marker along a real single-dose half-life curve (no multi-dose stack fiction).
  */
-function buildWashoutCurve() {
-  const HL = 7;           // half-life in abstract units (1 unit ≈ 1 day)
-  const DOSE2_U = 7;      // second dose at one HL (weekly protocol)
-  const TOTAL_U = 35;     // ~5 half-lives total display
-  const PPU = 3;          // points-per-unit for smooth curve
-  const RISE = 5;         // steps for dose-2 absorption rise
-
-  const out = [];
-
-  // Phase 1: dose 1 decay (0 → DOSE2_U)
-  for (let i = 0; i <= DOSE2_U * PPU; i++) {
-    const u = i / PPU;
-    out.push({ u, conc: 100 * Math.pow(0.5, u / HL) });
-  }
-  const concTrough = out[out.length - 1].conc; // ≈50 at day 7
-
-  // Rise: dose 2 absorption (near-vertical spike)
-  for (let k = 1; k <= RISE; k++) {
-    const frac = k / RISE;
-    out.push({ u: DOSE2_U + 0.08 * frac, conc: concTrough + 100 * frac });
-  }
-  const uSecond0 = DOSE2_U + 0.08;
-  const peakSecond = concTrough + 100; // ≈150
-
-  // Phase 2: combined decay from peakSecond (same HL)
-  const leftoverU = TOTAL_U - DOSE2_U;
-  for (let i = 0; i <= leftoverU * PPU; i++) {
-    const local = i / PPU;
-    out.push({ u: uSecond0 + local, conc: peakSecond * Math.pow(0.5, local / HL) });
-  }
-
-  const uMax = out[out.length - 1].u;
-  return { curveData: out, uMax, uSecond0, peakSecond, HL, DOSE2_U };
-}
-
-const WASHOUT_CURVE = buildWashoutCurve();
-/** Y-axis ceiling — above stacked peak so it doesn't clip */
-const WG_Y_MAX = 160;
+const DEMO_HL_HOURS = 5 * 24; // ~5-day HL (e.g. Tirzepatide-style)
+const DEMO_CLEAR_HOURS = DEMO_HL_HOURS * 7; // ~99% clearance ≈ 7 half-lives
 
 function WashoutFlowGraphWidget() {
-  const { curveData, uMax, uSecond0, peakSecond, HL, DOSE2_U } = WASHOUT_CURVE;
-  const TOTAL_PTS = curveData.length;
+  const accent = '#7F9E95';
+  const W = 360;
+  const H = 110;
+  const PAD_L = 28;
+  const PAD_R = 8;
+  const PAD_T = 14;
+  const PAD_B = 22;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
 
-  const MILESTONES = [
-    { u: 0,           conc: 100,                                 badge: '100%'  },
-    { u: HL,          conc: 100 * Math.pow(0.5, 1),             badge: '50%'   },
-    { u: uSecond0,    conc: peakSecond,                         badge: '+D2'   },
-    { u: uSecond0 + HL * 1.5, conc: peakSecond * Math.pow(0.5, 1.5), badge: '~30%' },
-    { u: uMax,        conc: curveData[curveData.length - 1].conc, badge: '~5%' },
-  ];
+  const pts = useMemo(
+    () => buildDecayCurve(DEMO_HL_HOURS, DEMO_CLEAR_HOURS, 80),
+    []
+  );
 
-  const MAX_STEP = 14;
-  const STATUS = [
-    'Dose 1 — peak concentration, then decays each half-life (~7 days)',
-    'Wk 1 — level at ~50% when next weekly dose is due',
-    'Dose 2 stacks on remaining — peak climbs to ~150% of single dose',
-    'Wk 2–3 — combined level decaying with same ~7-day half-life',
-    'Wk 4 — still measurable; takes ~5 half-lives to fully clear',
-    '✓ ~5 weeks post-last dose — compound effectively cleared',
-  ];
-
-  const [step, setStep] = useState(0);
-  const timerRef = useRef(null);
-  const pauseRef = useRef(null);
-
-  // SVG dimensions (bottom margin for dose labels)
-  const W = 280, H = 122;
-  const PL = 28, PR = 6, PT = 10, PB = 20;
-  const plotW = W - PL - PR;
-  const plotH = H - PT - PB;
-  const baseY = PT + plotH; // y-coordinate of the 0% line
-
-  const sx = (u) => PL + (u / uMax) * plotW;
-  // Y scale: 0 → WG_Y_MAX (160) so the stacked ~150 peak has headroom
-  const sy = (c) => PT + ((WG_Y_MAX - c) / WG_Y_MAX) * plotH;
-
-  const revealCount = Math.max(2, Math.round((step / MAX_STEP) * TOTAL_PTS));
-  const visible = curveData.slice(0, revealCount);
-  const visPolyline = visible.map((p) => `${sx(p.u).toFixed(1)},${sy(p.conc).toFixed(1)}`).join(' ');
-  const visArea = visible.length > 1
-    ? `${sx(visible[0].u).toFixed(1)},${baseY} ${visPolyline} ${sx(visible[visible.length - 1].u).toFixed(1)},${baseY}`
-    : '';
-  const fullPolyline = curveData.map((p) => `${sx(p.u).toFixed(1)},${sy(p.conc).toFixed(1)}`).join(' ');
-
-  const statusIdx = Math.min(STATUS.length - 1, Math.floor((step / MAX_STEP) * STATUS.length));
-  const lastVisibleU = visible[visible.length - 1]?.u ?? 0;
-  const currMilestoneIdx = MILESTONES.reduce((acc, ms, idx) => (lastVisibleU >= ms.u - 0.04 ? idx : acc), -1);
-
+  // Auto-demo: advance hours since dose from 0 → clearance, then loop
+  const [hoursSince, setHoursSince] = useState(0);
   useEffect(() => {
-    const STEP_MS = 1150;
-    const PAUSE_MS = 3800;
-    const clear = () => {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-      if (pauseRef.current) { clearTimeout(pauseRef.current); pauseRef.current = null; }
+    const STEP_H = DEMO_CLEAR_HOURS / 24; // ~24 frames across clearance
+    const STEP_MS = 900;
+    const PAUSE_MS = 2800;
+    let h = 0;
+    let timer = null;
+    let pause = null;
+
+    const tick = () => {
+      h += STEP_H;
+      if (h >= DEMO_CLEAR_HOURS) {
+        setHoursSince(DEMO_CLEAR_HOURS);
+        clearInterval(timer);
+        timer = null;
+        pause = setTimeout(() => {
+          h = 0;
+          setHoursSince(0);
+          timer = setInterval(tick, STEP_MS);
+        }, PAUSE_MS);
+        return;
+      }
+      setHoursSince(h);
     };
-    const run = () => {
-      clear(); setStep(0);
-      let s = 0;
-      timerRef.current = setInterval(() => {
-        s += 1;
-        if (s > MAX_STEP) {
-          clearInterval(timerRef.current); timerRef.current = null;
-          pauseRef.current = setTimeout(() => { pauseRef.current = null; run(); }, PAUSE_MS);
-          return;
-        }
-        setStep(s);
-      }, STEP_MS);
+
+    timer = setInterval(tick, STEP_MS);
+    return () => {
+      if (timer) clearInterval(timer);
+      if (pause) clearTimeout(pause);
     };
-    run();
-    return clear;
   }, []);
+
+  const currentLevel = getLevelAtTime(DEMO_HL_HOURS, hoursSince);
+  const hoursUntilClear = Math.max(0, DEMO_CLEAR_HOURS - hoursSince);
+  const alreadyClear = hoursUntilClear === 0;
+  const pct = alreadyClear ? 0 : Math.round(currentLevel * 100);
+  const remainingPct = Math.max(0, Math.min(100, Math.round((1 - hoursSince / DEMO_CLEAR_HOURS) * 100)));
+  const rowAccent = alreadyClear ? '#16a34a' : accent;
+
+  const pathPts = pts.map((pt) => {
+    const x = PAD_L + (pt.hour / DEMO_CLEAR_HOURS) * chartW;
+    const y = PAD_T + (1 - pt.level) * chartH;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const linePath = `M${pathPts.join(' L')}`;
+  const areaPath = `M${PAD_L},${PAD_T + chartH} L${pathPts.join(' L')} L${PAD_L + chartW},${PAD_T + chartH} Z`;
+
+  const nowFraction = Math.min(Math.max(hoursSince / DEMO_CLEAR_HOURS, 0), 0.995);
+  const nowX = PAD_L + nowFraction * chartW;
+  const nowY = PAD_T + (1 - Math.min(Math.max(currentLevel, 0), 1)) * chartH;
+  const hlX = PAD_L + Math.min(DEMO_HL_HOURS / DEMO_CLEAR_HOURS, 0.98) * chartW;
+  const hlY = PAD_T + (1 - 0.5) * chartH;
+
+  const fmtHoursAgo = (hours) => {
+    if (hours < 1) return `${Math.round(hours * 60)}m ago`;
+    if (hours < 48) return `${Math.round(hours)}h ago`;
+    return `${Math.round(hours / 24)}d ago`;
+  };
+  const fmtAxis = (hours) => {
+    if (hours < 48) return `${Math.round(hours)}h`;
+    return `${(hours / 24).toFixed(hours / 24 >= 10 ? 0 : 1)}d`;
+  };
+  const fmtUntilClear = alreadyClear
+    ? 'Cleared'
+    : hoursUntilClear < 48
+      ? `~${Math.round(hoursUntilClear)}h`
+      : `~${(hoursUntilClear / 24).toFixed(1)}d`;
+
+  const statusLine = alreadyClear
+    ? `${fmtHoursAgo(hoursSince)} last dose · Fully cleared`
+    : `${fmtHoursAgo(hoursSince)} last dose · Clears ${fmtUntilClear}`;
 
   return (
     <div
@@ -455,86 +434,151 @@ function WashoutFlowGraphWidget() {
         style={{ borderColor: 'rgba(47,59,58,0.15)', background: 'linear-gradient(135deg,rgba(127,158,149,0.08),rgba(127,158,149,0.03))' }}
       >
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs lg:text-sm font-bold" style={{ color: '#2F3B3A' }}>Half-Life Washout</h3>
-          <Pulse className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#7F9E95' }} aria-hidden />
+          <h3 className="text-xs lg:text-sm font-bold" style={{ color: '#2F3B3A' }}>Half-Life</h3>
+          <Pulse className="w-3.5 h-3.5 flex-shrink-0" style={{ color: accent }} aria-hidden />
         </div>
       </div>
-      <div className="px-2.5 pt-2.5 pb-2 lg:px-3.5 lg:pb-3 flex flex-1 flex-col min-h-0">
-        {/* Smooth exponential decay chart */}
+
+      <div className="px-2.5 pt-2.5 pb-2 lg:px-3 lg:pb-3 flex flex-1 flex-col min-h-0">
         <div
-          className="rounded-lg p-1.5 flex flex-1 flex-col min-h-0 items-stretch justify-center"
-          style={{ backgroundColor: 'rgba(127,158,149,0.08)', border: '1px solid rgba(47,59,58,0.18)' }}
+          className="rounded-2xl p-3 flex flex-col flex-1 min-h-0"
+          style={{
+            border: '1px solid rgba(0,0,0,0.06)',
+            backgroundColor: 'rgba(0,0,0,0.02)',
+            boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.04)',
+          }}
         >
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[200px] sm:max-h-none lg:min-h-[132px] flex-shrink-0" preserveAspectRatio="xMidYMid meet">
-            {/* Y-axis gridlines + labels (0–160 scale; 150 is stacked-dose peak) */}
-            {[150, 100, 50, 0].map((pct) => (
-              <g key={pct}>
-                <line x1={PL} y1={sy(pct)} x2={W - PR} y2={sy(pct)}
-                  stroke={pct === 150 ? 'rgba(79,140,127,0.28)' : 'rgba(47,59,58,0.13)'}
-                  strokeWidth="0.7"
-                  strokeDasharray={pct === 0 ? undefined : '3 2'}
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-sm font-bold truncate" style={{ color: '#2F3B3A' }}>
+                  Tirzepatide
+                </span>
+                <span
+                  className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold shrink-0"
+                  style={{ backgroundColor: `${accent}18`, color: accent }}
+                >
+                  5.0d HL
+                </span>
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: '#6B7280' }}>
+                {statusLine}
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-xl font-black tabular-nums leading-none" style={{ color: rowAccent }}>
+                {alreadyClear ? '0%' : `${pct}%`}
+              </div>
+              <div className="text-[9px] font-medium uppercase tracking-wider mt-0.5" style={{ color: '#6B7280' }}>
+                {alreadyClear ? 'cleared' : 'active'}
+              </div>
+            </div>
+          </div>
+
+          <div className="h-2 rounded-full overflow-hidden mb-2.5" style={{ backgroundColor: 'rgba(0,0,0,0.06)' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${remainingPct}%`,
+                backgroundColor: rowAccent,
+                opacity: 0.85,
+              }}
+            />
+          </div>
+
+          <div
+            className="rounded-xl overflow-hidden"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.55)',
+              border: '1px solid rgba(0,0,0,0.05)',
+            }}
+          >
+            <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="block" style={{ height: 108 }}>
+              <defs>
+                <linearGradient id="landing-cdrow-grad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={accent} stopOpacity="0.35" />
+                  <stop offset="55%" stopColor={accent} stopOpacity="0.12" />
+                  <stop offset="100%" stopColor={accent} stopOpacity="0.02" />
+                </linearGradient>
+                <clipPath id="landing-cdrow-clip">
+                  <rect x={PAD_L} y={PAD_T} width={chartW} height={chartH} rx="2" />
+                </clipPath>
+              </defs>
+
+              {[100, 50, 0].map((pctVal) => {
+                const y = PAD_T + (1 - pctVal / 100) * chartH;
+                return (
+                  <g key={`y-${pctVal}`}>
+                    <line x1={PAD_L} y1={y} x2={PAD_L + chartW} y2={y} stroke="rgba(0,0,0,0.07)" strokeWidth="1" />
+                    <text x={PAD_L - 4} y={y + 3} textAnchor="end" fontSize="8" fill="#888" fontWeight="600">
+                      {pctVal}%
+                    </text>
+                  </g>
+                );
+              })}
+
+              <g clipPath="url(#landing-cdrow-clip)">
+                <line x1={hlX} y1={PAD_T} x2={hlX} y2={PAD_T + chartH} stroke={accent} strokeWidth="1" strokeDasharray="3,3" opacity="0.35" />
+                <path d={areaPath} fill="url(#landing-cdrow-grad)" />
+                <path d={linePath} fill="none" stroke={accent} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+              </g>
+
+              <circle cx={PAD_L} cy={PAD_T} r="3.5" fill={accent} opacity="0.25" />
+              <circle cx={PAD_L} cy={PAD_T} r="2.25" fill={accent} />
+              <circle cx={hlX} cy={hlY} r="2.5" fill="#fff" stroke={accent} strokeWidth="1.5" />
+
+              <g>
+                <line
+                  x1={nowX} y1={PAD_T} x2={nowX} y2={PAD_T + chartH}
+                  stroke={rowAccent} strokeWidth="1.25" strokeDasharray="4,3" opacity="0.75"
                 />
-                <text x={PL - 3} y={sy(pct) + 3} textAnchor="end" fontSize="6.5" fill={pct === 150 ? '#4F8C7F' : '#8AADA8'} fontFamily="system-ui" fontWeight={pct === 150 ? '700' : '400'}>
-                  {pct === 150 ? '150' : `${pct}%`}
+                <circle cx={nowX} cy={nowY} r="5" fill={rowAccent} opacity="0.2" />
+                <circle cx={nowX} cy={nowY} r="3" fill={rowAccent} />
+                <rect
+                  x={Math.min(Math.max(nowX - 14, PAD_L), PAD_L + chartW - 28)}
+                  y={Math.max(PAD_T - 12, 2)}
+                  width="28" height="11" rx="3"
+                  fill={rowAccent}
+                />
+                <text
+                  x={Math.min(Math.max(nowX, PAD_L + 14), PAD_L + chartW - 14)}
+                  y={Math.max(PAD_T - 4, 10)}
+                  textAnchor="middle"
+                  fontSize="7"
+                  fill="#fff"
+                  fontWeight="700"
+                >
+                  Now
                 </text>
               </g>
-            ))}
 
-            {/* Ghost curve (full path, faint) */}
-            <polyline points={fullPolyline} fill="none" stroke="rgba(47,59,58,0.17)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-
-            {/* Filled area under revealed curve */}
-            {visArea && <polygon points={visArea} fill="rgba(79,140,127,0.12)" />}
-
-            {/* Active revealed curve */}
-            {visible.length > 1 && (
-              <polyline points={visPolyline} fill="none" stroke="#2F665C" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            )}
-
-            {/* Milestone markers (two-dose timeline) */}
-            {MILESTONES.map((m, i) => {
-              const active = lastVisibleU >= m.u - 0.04;
-              const curr = i === currMilestoneIdx;
-              const cx = sx(m.u);
-              const cy = sy(m.conc);
-              const badgeY = cy < 22 ? cy + 6 : cy - 16;
-              return (
-                <g key={`${m.u}-${i}`}>
-                  {curr && <circle cx={cx} cy={cy} r="8" fill="rgba(47,102,92,0.18)" className="animate-ping" />}
-                  <circle cx={cx} cy={cy} r={active ? 4 : 3} fill={active ? '#2F665C' : '#D5E0DC'} stroke={active ? '#fff' : 'rgba(47,59,58,0.3)'} strokeWidth="1.5" />
-
-                  {curr && m.badge && (
-                    <>
-                      <rect x={cx - 16} y={badgeY} width="32" height="12" rx="3" fill="#2F665C" />
-                      <text x={cx} y={badgeY + 8.5} textAnchor="middle" fontSize="7" fill="white" fontFamily="system-ui" fontWeight="700">{m.badge}</text>
-                    </>
-                  )}
-                </g>
-              );
-            })}
-
-            {/* Dose timeline axis — real-day markers (HL=7d, Dose2=Wk1, Clear≈Wk5) */}
-            {[
-              { u: 0,          label: 'Day 0'  },
-              { u: DOSE2_U,    label: 'Wk 1'   },
-              { u: DOSE2_U * 2, label: 'Wk 2'  },
-              { u: uMax,       label: 'Wk 5'   },
-            ].map(({ u, label }) => {
-              const cx = sx(u);
-              return (
-                <g key={`dose-tick-${u}`}>
-                  <line x1={cx} y1={baseY} x2={cx} y2={baseY + 3} stroke="rgba(47,59,58,0.25)" strokeWidth="1" />
-                  <text x={cx} y={H - 6} textAnchor="middle" fontSize="6.5" fill="#6B7D7A" fontFamily="system-ui" fontWeight="600">{label}</text>
-                </g>
-              );
-            })}
-          </svg>
-        </div>
-        {/* Status */}
-        <div className="mt-auto pt-1.5 text-center min-h-[1.75rem] flex items-center justify-center">
-          <p className="text-[9px] md:text-[10px] leading-tight px-1" style={{ color: '#4A5A56' }}>
-            {STATUS[statusIdx]}
-          </p>
+              {[
+                { hour: 0, label: 'Dose' },
+                { hour: DEMO_HL_HOURS, label: '½ life' },
+                { hour: DEMO_CLEAR_HOURS, label: 'Clear' },
+              ].map(({ hour, label }) => {
+                const x = PAD_L + Math.min(hour / DEMO_CLEAR_HOURS, 1) * chartW;
+                const timeBit = hour > 0 && hour < DEMO_CLEAR_HOURS
+                  ? ` · ${fmtAxis(hour)}`
+                  : hour >= DEMO_CLEAR_HOURS
+                    ? ` · ${fmtAxis(DEMO_CLEAR_HOURS)}`
+                    : '';
+                return (
+                  <text
+                    key={label}
+                    x={x}
+                    y={H - 6}
+                    textAnchor={hour === 0 ? 'start' : hour >= DEMO_CLEAR_HOURS ? 'end' : 'middle'}
+                    fontSize="8"
+                    fill="#888"
+                    fontWeight="600"
+                  >
+                    {label}{timeBit}
+                  </text>
+                );
+              })}
+            </svg>
+          </div>
         </div>
       </div>
     </div>
@@ -1162,12 +1206,9 @@ export default function Landing() {
       <section key="app-showcase" className="py-12 md:py-14 lg:py-16 animate-[fadeInUp_0.4s_ease-out]" style={{ backgroundColor: SEE_IT_IN_ACTION_BG }}>
         <div className="w-full px-4 md:max-w-7xl md:mx-auto md:px-8 xl:px-10">
           <div className="text-center mb-8 lg:mb-10">
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2" style={{ color: '#2F3B3A', fontFamily: 'Poppins, sans-serif' }}>
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold" style={{ color: '#2F3B3A', fontFamily: 'Poppins, sans-serif' }}>
               See it in action
             </h2>
-            <p className="text-sm lg:text-base max-w-xl lg:max-w-2xl mx-auto leading-relaxed" style={{ color: '#6B7D7A' }}>
-              Real features you'll use every day. Try them right here.
-            </p>
           </div>
           <div className="grid grid-cols-2 gap-3 md:gap-6 lg:gap-8 xl:gap-10 items-stretch lg:items-start max-w-6xl xl:max-w-none mx-auto">
             <WashoutFlowGraphWidget />

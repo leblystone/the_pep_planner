@@ -471,6 +471,16 @@ const DEFAULT_TEMPLATES = {
     body: "You have {peptideCount} peptide(s) and {supplementCount} supplement(s) scheduled for this evening.",
     actionUrl: "/app/dashboard"
   },
+  researchReminderAMComplete: {
+    title: "☀️ Morning research done",
+    body: "Everything on your morning list is complete. Nice work!",
+    actionUrl: "/app/dashboard"
+  },
+  researchReminderPMComplete: {
+    title: "✅ Research is done for today",
+    body: "Research is done for today. Great work!",
+    actionUrl: "/app/dashboard"
+  },
   titrationDoseChange: {
     title: "📈 Dose Change Today!",
     body: "Your {peptideName} dose changes today: {oldDose} → {newDose}. Check your protocol for details.",
@@ -517,18 +527,8 @@ const DEFAULT_TEMPLATES = {
     actionUrl: "/app/orders"
   },
   researchPlusExpiringSoon: {
-    title: "⏳ Research+ expiring soon",
-    body: "Your Research+ access ends in {daysLeft} days. Renew to keep unlimited protocols and cloud sync.",
-    actionUrl: "/app/account"
-  },
-  freePlanActive: {
-    title: "You're on the free plan",
-    body: "Your Pep Planner is on the free plan! Upgrade to Research+ anytime to unlock full access.",
-    actionUrl: "/app/account"
-  },
-  researchPlusWinback: {
-    title: "Wanna jump back into Research+?",
-    body: "It's been a while — your research data is still here. Come back to Research+ anytime.",
+    title: "⏳ Research+ trial ending soon",
+    body: "Your Research+ trial ends in {daysLeft} days. Subscribe to keep unlimited protocols and cloud sync.",
     actionUrl: "/app/account"
   },
   paymentFailedSoon: {

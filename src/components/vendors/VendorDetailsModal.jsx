@@ -29,8 +29,12 @@ import {
   ChatText,
   CaretDown,
   Star,
+  Envelope,
+  Phone,
+  Globe,
 } from '@phosphor-icons/react'
 import { SiZelle, SiCashapp, SiVenmo } from 'react-icons/si'
+import { FaDiscord, FaTelegramPlane, FaWhatsapp, FaFacebook } from 'react-icons/fa'
 import { generateId } from '../../utils/string'
 import { useAppContext } from '../../context/AppContext'
 
@@ -190,7 +194,8 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
         </div>
       }
       theme={theme} 
-      maxHeight="90vh" 
+      fitContent
+      maxHeight="80vh" 
       footer={(
       <div className="w-full flex items-center justify-between gap-3">
         <div className="flex items-center">
@@ -236,12 +241,12 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
               color: theme?.textOnPrimary || '#ffffff'
             }}
           >
-            Save Vendor
+            {vendor?.id ? 'Update Vendor' : 'Save Vendor'}
           </button>
         </div>
       </div>
     )}    >
-      <div className="relative space-y-2">
+      <div className="relative space-y-4">
         {/* VENDOR INFO Section Header */}
         <div className="pt-1">
           {/* Section Header */}
@@ -303,7 +308,6 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
         </div>
 
         {/* CONTACT INFO Section Header */}
-        {!simpleMode && (
         <div className="pt-2">
           {/* Section Header */}
           <div className="flex items-center gap-2 mb-2">
@@ -319,41 +323,9 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
             </div>
           </div>
         </div>
-        )}
 
 
         {/* Section: Contacts */}
-        {simpleMode ? (
-          /* Read-only contact summary — prevents accidental corruption of multi-contact data */
-          <div className="space-y-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: theme.textLight }}>
-              Contact info
-            </p>
-            {Array.isArray(form.contacts) && form.contacts.filter(c => c.value?.trim()).length > 0 ? (
-              form.contacts.filter(c => c.value?.trim()).map((c, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
-                  style={{
-                    backgroundColor: theme.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                    border: `1px solid ${theme.border}`,
-                    color: theme.text,
-                  }}
-                >
-                  <span className="text-[10px] font-bold uppercase tracking-wider opacity-50 w-14 flex-shrink-0">
-                    {c.type || 'other'}
-                  </span>
-                  <span className="truncate">{c.value}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm italic" style={{ color: theme.textLight }}>No contacts saved yet.</p>
-            )}
-            <p className="text-[10px]" style={{ color: theme.textLight, opacity: 0.6 }}>
-              Switch to Advanced mode to add or edit contacts.
-            </p>
-          </div>
-        ) : (
         <div>
           <div className="space-y-2">
             {form.contacts.map((c, idx) => (
@@ -370,7 +342,7 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
                     >
                       {/* Type Selector - entire left area is tappable */}
                       <div 
-                        className="border-r flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none"
+                        className="border-r flex items-center gap-2 pl-3 pr-2.5 py-2.5 cursor-pointer select-none min-w-[8.5rem] shrink-0"
                         style={{ 
                           borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : '#f0eee7', 
                           color: theme.text,
@@ -386,10 +358,11 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
                           }
                         }}
                       >
-                        <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">
+                        {getContactTypeIcon(c.type, theme.primary)}
+                        <span className="text-[11px] font-bold uppercase tracking-wider flex-1 truncate" style={{ color: theme.text }}>
                           {getContactLabel(c.type)}
                         </span>
-                        <CaretDown size={10} className={`transition-transform duration-200 ${openDropdowns[idx] ? 'rotate-180' : ''}`} />
+                        <CaretDown size={10} className={`shrink-0 opacity-50 transition-transform duration-200 ${openDropdowns[idx] ? 'rotate-180' : ''}`} />
                       </div>
 
                       <input 
@@ -435,19 +408,10 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
                       zIndex: 50,
                       backgroundColor: theme.isDark ? 'rgba(24, 28, 36, 0.98)' : (theme.cardBackground || '#fff'),
                       borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : '#f0eee7',
-                      width: '160px',
+                      width: '11.5rem',
                     }}
                   >
-                    {[
-                      { value: 'email', label: 'Email' },
-                      { value: 'website', label: 'Website' },
-                      { value: 'phone', label: 'Phone' },
-                      { value: 'whatsapp', label: 'WhatsApp' },
-                      { value: 'telegram', label: 'Telegram' },
-                      { value: 'discord', label: 'Discord' },
-                      { value: 'facebook', label: 'Facebook' },
-                      { value: 'other', label: 'Other' }
-                    ].map((option, i, arr) => (
+                    {CONTACT_TYPE_OPTIONS.map((option, i, arr) => (
                       <button
                         key={option.value}
                         type="button"
@@ -457,13 +421,14 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
                           updateContact(idx, 'type', option.value);
                           setOpenDropdowns({});
                         }}
-                        className="w-full text-left px-3 py-2 text-sm font-medium transition-colors"
+                        className="w-full text-left px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2.5"
                         style={{ 
                           color: c.type === option.value ? theme.primary : theme.text,
                           backgroundColor: c.type === option.value ? `${theme.primary}08` : 'transparent',
                           borderBottom: i < arr.length - 1 ? `1px solid ${theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` : 'none',
                         }}
                       >
+                        {getContactTypeIcon(option.value, c.type === option.value ? theme.primary : theme.textLight)}
                         {option.label}
                       </button>
                     ))}
@@ -473,7 +438,7 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
             ))}
             
             <button 
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]" 
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98] self-end ml-auto" 
               style={{ 
                 backgroundColor: `${theme.primary}15`,
                 color: theme.primary,
@@ -486,7 +451,6 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
             </button>
           </div>
         </div>
-        )}
 
         {/* PAYMENT METHODS Section Header */}
         {!simpleMode && (
@@ -510,7 +474,7 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
         {/* Section: Payment */}
         {!simpleMode && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {[
               { name: 'Card', key: 'card', icon: CreditCard },
               { name: 'Zelle', key: 'zelle', icon: SiZelle },
@@ -528,16 +492,17 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
                   key={payment.key}
                   type="button"
                   onClick={() => setForm(prev => ({ ...prev, payments: { ...prev.payments, [payment.key]: !prev.payments[payment.key] } }))}
-                  className="flex flex-col items-center justify-center p-2.5 rounded-lg transition-all duration-200 active:scale-95"
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all duration-200 active:scale-95 min-w-0"
                   style={{
-                    backgroundColor: isSelected ? '#445952' : (theme.isDark ? '#1f2937' : '#f5f4f0'),
-                    border: isSelected ? '1px solid #3B4240' : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.05)' : '#e8e6df'}`,
-                    color: isSelected ? '#fff' : (theme.isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'),
-                    boxShadow: isSelected ? 'inset 0 2px 4px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.1)' : 'inset 0 1px 3px rgba(0,0,0,0.06)'
+                    backgroundColor: isSelected ? '#445952' : (theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
+                    border: isSelected ? '1px solid #3B4240' : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
+                    color: isSelected ? '#fff' : (theme.isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)'),
+                    boxShadow: isSelected ? 'inset 0 2px 4px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.1)' : 'inset 0 1px 3px rgba(0,0,0,0.06)',
+                    WebkitTapHighlightColor: 'transparent',
                   }}
                 >
-                  <Icon size={18} className="mb-1.5" style={{ color: isSelected ? '#fff' : 'inherit' }} />
-                  <span className="text-[10px] font-bold uppercase tracking-wider">{payment.name}</span>
+                  <Icon size={20} className="shrink-0" style={{ color: isSelected ? '#fff' : 'inherit' }} />
+                  <span className="text-sm font-semibold leading-tight truncate text-center">{payment.name}</span>
                 </button>
               )
             })}
@@ -666,7 +631,7 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
         {/* Section: Labels + Notes */}
         {!simpleMode && (
         <div className="space-y-3">
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {labelOptions.map(label => {
               const Icon = getLabelIcon(label)
               const isSelected = Array.isArray(form.labels) && form.labels.includes(label)
@@ -675,16 +640,17 @@ export default function VendorDetailsModal({ open, onClose, theme, vendor, onSav
                   key={label}
                   type="button"
                   onClick={() => setForm(prev => ({ ...prev, labels: isSelected ? (prev.labels||[]).filter(x => x !== label) : Array.from(new Set([...(prev.labels||[]), label])) }))}
-                  className="flex flex-col items-center justify-center p-1.5 rounded-lg transition-all duration-200 active:scale-95"
+                  className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all duration-200 active:scale-95 min-w-0"
                   style={{
-                    backgroundColor: isSelected ? '#6B7F77' : (theme.isDark ? '#1f2937' : '#f5f4f0'),
-                    border: isSelected ? '1px solid #566D64' : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.05)' : '#e8e6df'}`,
-                    color: isSelected ? '#fff' : (theme.isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'),
-                    boxShadow: isSelected ? 'inset 0 2px 4px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.08)' : 'inset 0 1px 3px rgba(0,0,0,0.06)'
+                    backgroundColor: isSelected ? '#6B7F77' : (theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
+                    border: isSelected ? '1px solid #566D64' : `1px solid ${theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
+                    color: isSelected ? '#fff' : (theme.isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)'),
+                    boxShadow: isSelected ? 'inset 0 2px 4px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.08)' : 'inset 0 1px 3px rgba(0,0,0,0.06)',
+                    WebkitTapHighlightColor: 'transparent',
                   }}
                 >
-                  <Icon size={14} className="mb-1" style={{ color: isSelected ? '#fff' : 'inherit' }} />
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-center leading-tight">{label}</span>
+                  <Icon size={20} className="shrink-0" style={{ color: isSelected ? '#fff' : 'inherit' }} />
+                  <span className="text-sm font-semibold leading-tight truncate text-center">{label}</span>
                 </button>
               )
             })}
@@ -846,6 +812,30 @@ function getContactLabel(type) {
     default: return 'Contact'
   }
 }
+
+function getContactTypeIcon(type, color) {
+  const s = String(type || '').toLowerCase()
+  const style = { color }
+  if (s === 'email') return <Envelope size={16} weight="duotone" style={style} />
+  if (s === 'phone') return <Phone size={16} weight="duotone" style={style} />
+  if (s === 'website') return <Globe size={16} weight="duotone" style={style} />
+  if (s === 'whatsapp') return <FaWhatsapp size={16} style={style} />
+  if (s === 'discord') return <FaDiscord size={16} style={style} />
+  if (s === 'telegram') return <FaTelegramPlane size={16} style={style} />
+  if (s === 'facebook') return <FaFacebook size={16} style={style} />
+  return <ChatText size={16} weight="duotone" style={style} />
+}
+
+const CONTACT_TYPE_OPTIONS = [
+  { value: 'email', label: 'Email' },
+  { value: 'website', label: 'Website' },
+  { value: 'phone', label: 'Phone' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'telegram', label: 'Telegram' },
+  { value: 'discord', label: 'Discord' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'other', label: 'Other' },
+]
 
 function createEmptyVendor() {
   return {

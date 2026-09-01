@@ -24,9 +24,9 @@ const FOUNDERS_CUTOFF_MS = new Date('2026-05-05T00:00:00.000Z').getTime();
 
 // Keep in sync with googlePlayWebhooks.js GP_RP_PRODUCT_MAP
 const PLAN_MAPPING = {
-  'com.thepepplanner.app.researchmonthly':  { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month',    tier: 'research_plus' },
-  'com.thepepplanner.app.researchannual':   { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year',     tier: 'research_plus' },
-  'com.thepepplanner.app.researchlifetime': { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime', tier: 'research_plus' },
+  'm.thepepplanner.app.researchmonthly':  { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month',    tier: 'research_plus' },
+  'm.thepepplanner.app.researchannual':   { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year',     tier: 'research_plus' },
+  'm.thepepplanner.app.researchlifetime': { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime', tier: 'research_plus' },
 };
 
 async function resolveUserTier(userId, baseTier, db) {
@@ -58,10 +58,10 @@ exports.adminManualAndroidGrant = onCall(
       throw new HttpsError('permission-denied', 'Admin access required');
     }
 
-    const { userId, productId, reason, adminNote } = request.data;
+    const { userId, productId, purchaseToken, reason, adminNote } = request.data;
     if (!userId) throw new HttpsError('invalid-argument', 'userId is required');
 
-    const resolvedProductId = productId || 'com.thepepplanner.app.researchannual';
+    const resolvedProductId = productId || 'm.thepepplanner.app.researchannual';
     const planDetails = PLAN_MAPPING[resolvedProductId];
 
     if (!planDetails) {
@@ -96,6 +96,7 @@ exports.adminManualAndroidGrant = onCall(
       interval: planDetails.interval,
       paymentProvider: 'google_play',
       googlePlayProductId: resolvedProductId,
+      ...(purchaseToken ? { googlePlayPurchaseToken: purchaseToken } : {}),
       currentPeriodStart: now,
       currentPeriodEnd: periodEnd,
       hasLifetimeAccess: planDetails.interval === 'lifetime',

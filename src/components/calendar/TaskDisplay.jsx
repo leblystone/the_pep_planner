@@ -71,13 +71,49 @@ const getResolvedPenColor = (penColor) => {
 
 // Main TaskDisplay component
 // Styled to match Today's Research widget (TasksList) for visual consistency
-const TaskDisplay = ({ 
+const SIZE_STYLES = {
+  compact: {
+    row: 'py-2 sm:py-2.5',
+    name: 'text-xs sm:text-sm',
+    dose: 'text-xs sm:text-sm',
+    penType: 'text-[10px] sm:text-xs',
+    icon: 12,
+    menuIcon: 14,
+    checkbox: 'w-5 h-5 sm:w-6 sm:h-6',
+    checkIcon: 14,
+    checkIconSm: 'sm:w-[18px] sm:h-[18px]',
+  },
+  normal: {
+    row: 'py-2.5 sm:py-3',
+    name: 'text-sm sm:text-base',
+    dose: 'text-sm sm:text-base',
+    penType: 'text-xs sm:text-sm',
+    icon: 14,
+    menuIcon: 16,
+    checkbox: 'w-6 h-6 sm:w-7 sm:h-7',
+    checkIcon: 16,
+    checkIconSm: 'sm:w-[20px] sm:h-[20px]',
+  },
+  detailed: {
+    row: 'py-3 sm:py-3.5',
+    name: 'text-base sm:text-lg',
+    dose: 'text-sm sm:text-base',
+    penType: 'text-xs sm:text-sm',
+    icon: 16,
+    menuIcon: 18,
+    checkbox: 'w-7 h-7',
+    checkIcon: 18,
+    checkIconSm: 'sm:w-[22px] sm:h-[22px]',
+  },
+};
+
+const TaskDisplay = ({
   task, 
   theme, 
   date, 
   timeSlot, 
   onToggle, 
-  size = 'normal', // 'compact', 'normal', 'detailed'
+  size = 'compact', // 'compact', 'normal', 'detailed'
   showCheckbox = true,
   showPenDetails = true,
   dateKey: dateKeyOverride,
@@ -92,6 +128,7 @@ const TaskDisplay = ({
   viewDateKey,
   scheduleActionsDisabled = false,
 }) => {
+  const styles = SIZE_STYLES[size] || SIZE_STYLES.normal;
   // Prefer an explicit date key if provided to avoid timezone parsing issues
   const dateKey = dateKeyOverride || (date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : '');
   const taskId = generateTaskId(task);
@@ -239,7 +276,7 @@ const TaskDisplay = ({
 
   return (
     <div 
-      className={`flex items-center justify-between gap-2 py-2.5 sm:py-3 px-3 min-w-0 transition-all duration-200 ${isBuddy ? 'rounded-xl' : ''}`}
+      className={`flex items-center justify-between gap-2 ${styles.row} px-3 min-w-0 transition-all duration-200 ${isBuddy ? 'rounded-xl' : ''}`}
       style={{ 
         backgroundColor: buddyRowBg,
         borderLeft: borderLeftColor,
@@ -253,7 +290,7 @@ const TaskDisplay = ({
       <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 overflow-hidden">
         <div className="flex-1 min-w-0 overflow-hidden">
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-            <div className={`font-semibold text-xs sm:text-sm truncate ${isCompleted || isInactiveDose ? 'line-through decoration-2' : ''}`} style={{ color: mutedColor }}>
+            <div className={`font-semibold ${styles.name} truncate ${isCompleted || isInactiveDose ? 'line-through decoration-2' : ''}`} style={{ color: mutedColor }}>
               {task.name}
             </div>
             {statusChip && (
@@ -271,7 +308,7 @@ const TaskDisplay = ({
       <div className={`text-right flex items-center gap-1 sm:gap-2 flex-shrink-0 ${isCompleted || isInactiveDose ? 'line-through decoration-2' : ''}`} style={{ color: mutedColor }}>
         {/* Dose and units */}
         <div className="text-right">
-          <div className="font-medium text-xs sm:text-sm whitespace-nowrap" style={{ color: mutedColor }}>
+          <div className={`font-medium ${styles.dose} whitespace-nowrap`} style={{ color: mutedColor }}>
             {task.dose}{task.unit ? ` ${task.unit}` : ''}
           </div>
         </div>
@@ -289,7 +326,7 @@ const TaskDisplay = ({
               title={`Pen Color: ${task.penColor || 'Default'}`}
             />
             {task.penType && (
-              <span className="text-[10px] sm:text-xs font-medium hidden xs:inline" style={{ color: isCompleted || isInactiveDose ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.textLight }}>
+              <span className={`${styles.penType} font-medium hidden xs:inline`} style={{ color: isCompleted || isInactiveDose ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.textLight }}>
                 {task.penType.toUpperCase()}
               </span>
             )}
@@ -298,7 +335,7 @@ const TaskDisplay = ({
 
         {/* Delivery method icon */}
         <div className="flex-shrink-0" style={{ opacity: isCompleted || isInactiveDose ? 0.5 : 1 }}>
-          <DeliveryIcon task={task} theme={theme} size={12} />
+          <DeliveryIcon task={task} theme={theme} size={styles.icon} />
         </div>
 
         {/* ⋮ schedule menu button */}
@@ -312,7 +349,7 @@ const TaskDisplay = ({
             aria-label="Schedule options"
             title="Schedule options"
           >
-            <MoreVertical size={14} />
+            <MoreVertical size={styles.menuIcon} />
           </button>
         )}
 
@@ -328,7 +365,7 @@ const TaskDisplay = ({
               e.stopPropagation();
               handleToggle();
             }}
-            className="w-5 h-5 sm:w-6 sm:h-6 rounded-sm border-2 relative flex items-center justify-center flex-shrink-0 transition-all hover:scale-110 cursor-pointer touch-manipulation"
+            className={`${styles.checkbox} rounded-sm border-2 relative flex items-center justify-center flex-shrink-0 transition-all hover:scale-110 cursor-pointer touch-manipulation`}
             style={{
               borderColor: checkboxBorder,
               backgroundColor: checkboxBg,
@@ -341,8 +378,8 @@ const TaskDisplay = ({
           >
             {isCompleted && (
               <Check 
-                size={14} 
-                className="sm:w-[18px] sm:h-[18px] absolute text-white" 
+                size={styles.checkIcon} 
+                className={`${styles.checkIconSm} absolute text-white`} 
                 style={{ 
                   strokeWidth: 2.5,
                   top: '-3px',

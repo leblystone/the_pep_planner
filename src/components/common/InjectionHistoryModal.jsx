@@ -334,13 +334,13 @@ function SiteMapBody({ history, theme, activeDot, setActiveDot }) {
 
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
-export default function InjectionHistoryModal({ isOpen, onClose, theme, filterTaskName, dateScopeStart, dateScopeEnd }) {
+export default function InjectionHistoryModal({ isOpen, onClose, theme, filterTaskName, dateScopeStart, dateScopeEnd, initialView = 'list' }) {
     const [injectionHistory, setInjectionHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [deleteConfirmId, setDeleteConfirmId] = useState(null);
     const [dateFilter, setDateFilter] = useState('all');
     const [activeTaskFilter, setActiveTaskFilter] = useState(filterTaskName || null);
-    const [view, setView] = useState('list'); // 'list' | 'map'
+    const [view, setView] = useState(initialView); // 'list' | 'map'
     const [activeDot, setActiveDot] = useState(null);
     const [showAllTime, setShowAllTime] = useState(false);
 
@@ -368,7 +368,7 @@ export default function InjectionHistoryModal({ isOpen, onClose, theme, filterTa
             setDateFilter('all');
         } else {
             setEditingId(null);
-            setView('list');
+            setView(initialView);
             setActiveDot(null);
         }
     }, [isOpen, filterTaskName, hasDateScope, dateScopeStart, dateScopeEnd]);

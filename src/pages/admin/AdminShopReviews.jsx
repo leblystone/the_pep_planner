@@ -43,8 +43,9 @@ function formatDateInput(d) {
   return date.toISOString().slice(0, 10);
 }
 
-export default function AdminShopReviews() {
-  const { theme } = useOutletContext();
+export default function AdminShopReviews({ embedded = false, theme: themeProp } = {}) {
+  const outlet = useOutletContext();
+  const theme = themeProp || outlet?.theme;
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -234,13 +235,22 @@ export default function AdminShopReviews() {
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div className={embedded ? 'space-y-5' : 'p-4 md:p-6 max-w-5xl'}>
+      <div className={`flex flex-wrap items-center justify-between gap-4 ${embedded ? '' : 'mb-6'}`}>
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: theme.text }}>Shop reviews</h1>
-          <p className="text-sm mt-1" style={{ color: theme.textLight }}>
-            Store-wide reviews (not tied to individual products). Import manually from Etsy, TikTok, website, or community.
-          </p>
+          {!embedded && (
+            <>
+              <h1 className="text-2xl font-bold" style={{ color: theme.text }}>Shop reviews</h1>
+              <p className="text-sm mt-1" style={{ color: theme.textLight }}>
+                Store-wide reviews (not tied to individual products). Import manually from Etsy, TikTok, website, or community.
+              </p>
+            </>
+          )}
+          {embedded && (
+            <p className="text-sm max-w-2xl" style={{ color: theme.textLight }}>
+              Store-wide reviews (not tied to individual products). Import manually from Etsy, TikTok, website, or community.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <button

@@ -457,6 +457,20 @@ function buildTodayTasks(userDataObj, userTimezone, now = new Date()) {
     return !isTaskCompleted(generateTaskId(s), 'PM');
   });
 
+  // Slot totals for the global AM/PM reminders (exclude peptides that use a custom
+  // reminder time — those are handled separately). Used to distinguish:
+  //   0 scheduled  → do not fire
+  //   all complete → "research is done" ping
+  //   some incomplete → normal reminder
+  const scheduledPeptidesAM = finalPeptides.filter(
+    (p) => p.time === 'AM' && (!p.customReminder || !p.reminderTime)
+  );
+  const scheduledSupplementsAM = finalSupplements.filter((s) => s.time === 'AM');
+  const scheduledPeptidesPM = finalPeptides.filter(
+    (p) => p.time === 'PM' && (!p.customReminder || !p.reminderTime)
+  );
+  const scheduledSupplementsPM = finalSupplements.filter((s) => s.time === 'PM');
+
   return {
     local,
     todayKey,
@@ -464,6 +478,8 @@ function buildTodayTasks(userDataObj, userTimezone, now = new Date()) {
     incompleteSupplementsAM,
     incompletePeptidesPM,
     incompleteSupplementsPM,
+    scheduledCountAM: scheduledPeptidesAM.length + scheduledSupplementsAM.length,
+    scheduledCountPM: scheduledPeptidesPM.length + scheduledSupplementsPM.length,
     totalItems: finalPeptides.length + finalSupplements.length,
   };
 }
@@ -631,6 +647,8 @@ async function processUserResearchReminders(userId, userDoc, userDataObj, now, p
     incompleteSupplementsAM,
     incompletePeptidesPM,
     incompleteSupplementsPM,
+    scheduledCountAM,
+    scheduledCountPM,
   } = tasks;
 
   const allIncompletePeptides = [...incompletePeptidesAM, ...incompletePeptidesPM];
@@ -687,26 +705,57 @@ async function processUserResearchReminders(userId, userDoc, userDataObj, now, p
     isWithinWindowLocal(pmHour, pmMinute);
 
   let notificationType = '';
+  let notificationMode = ''; // 'incomplete' | 'complete'
   let notificationPeptides = [];
   let notificationSupplements = [];
 
-  if (matchesAM && (globalPeptidesAM.length > 0 || incompleteSupplementsAM.length > 0)) {
-    notificationType = 'AM';
-    notificationPeptides = globalPeptidesAM;
-    notificationSupplements = incompleteSupplementsAM;
-  } else if (matchesPM && (globalPeptidesPM.length > 0 || incompleteSupplementsPM.length > 0)) {
-    notificationType = 'PM';
-    notificationPeptides = globalPeptidesPM;
-    notificationSupplements = incompleteSupplementsPM;
+  if (matchesAM) {
+    if (scheduledCountAM === 0) {
+      // No morning research scheduled → do not fire
+    } else if (globalPeptidesAM.length > 0 || incompleteSupplementsAM.length > 0) {
+      notificationType = 'AM';
+      notificationMode = 'incomplete';
+      notificationPeptides = globalPeptidesAM;
+      notificationSupplements = incompleteSupplementsAM;
+    } else {
+      // Had morning research, all done → celebrate instead of silence
+      notificationType = 'AM';
+      notificationMode = 'complete';
+    }
+  } else if (matchesPM) {
+    // Evening also rolls in unfinished morning research (missed check-offs).
+    const missedMorningPeptides = incompletePeptidesAM.filter(
+      (p) => !p.customReminder || !p.reminderTime
+    );
+    const missedMorningSupplements = incompleteSupplementsAM;
+    const hasMissedMorning =
+      missedMorningPeptides.length > 0 || missedMorningSupplements.length > 0;
+    const hasEveningIncomplete =
+      globalPeptidesPM.length > 0 || incompleteSupplementsPM.length > 0;
+    const hasEveningScheduled = scheduledCountPM > 0;
+
+    if (!hasEveningScheduled && !hasMissedMorning) {
+      // No evening research and morning was finished (or never scheduled) → silent
+    } else if (hasMissedMorning || hasEveningIncomplete) {
+      notificationType = 'PM';
+      notificationMode = 'incomplete';
+      // Morning leftovers first, then evening — so the list reads chronologically
+      notificationPeptides = [...missedMorningPeptides, ...globalPeptidesPM];
+      notificationSupplements = [...missedMorningSupplements, ...incompleteSupplementsPM];
+    } else if (hasEveningScheduled) {
+      // Evening was on the schedule and everything (AM leftovers + PM) is done
+      notificationType = 'PM';
+      notificationMode = 'complete';
+    }
   }
 
-  if (notificationType) {
-    const timeLabel = notificationType === 'AM' ? 'Morning' : 'Evening';
+  if (notificationType && notificationMode === 'incomplete') {
+    const listLabel = notificationType === 'AM' ? 'Morning research' : 'Still due';
     const defaultTitle = notificationType === 'AM' ? '☀️ Morning Research Reminder' : '🌙 Evening Research Reminder';
     const defaultBody = buildNotificationBody(
       notificationPeptides,
       notificationSupplements,
-      `${timeLabel} research`
+      listLabel
     );
     if (defaultBody) {
       const templateType = notificationType === 'AM' ? 'researchReminderAM' : 'researchReminderPM';
@@ -732,6 +781,36 @@ async function processUserResearchReminders(userId, userDoc, userDataObj, now, p
         })
       );
     }
+  } else if (notificationType && notificationMode === 'complete') {
+    const defaultTitle =
+      notificationType === 'AM' ? '☀️ Morning research done' : '✅ Research is done for today';
+    const defaultBody =
+      notificationType === 'AM'
+        ? 'Everything on your morning list is complete. Nice work!'
+        : 'Research is done for today. Great work!';
+    const templateType =
+      notificationType === 'AM' ? 'researchReminderAMComplete' : 'researchReminderPMComplete';
+    const { title, body } = await loadTemplate(
+      templateType,
+      [],
+      [],
+      defaultTitle,
+      defaultBody
+    );
+    promises.push(
+      pushNotifications.sendPushNotificationByType(userId, 'researchReminders', {
+        title,
+        body,
+        peptides: [],
+        supplements: [],
+        peptideCount: 0,
+        supplementCount: 0,
+        appUrl: 'https://thepepplanner.com/app/dashboard',
+        _trigger: 'cron:researchReminders',
+        _slot: `${notificationType}:complete`,
+        _templateType: templateType,
+      })
+    );
   }
 
   processTitrationReminders(userId, userDataObj, userTimezone, now, promises, activeSlots);

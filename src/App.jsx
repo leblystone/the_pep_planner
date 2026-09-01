@@ -11,6 +11,7 @@ import { Capacitor } from '@capacitor/core';
 import { ensureNativePushRegistration, flushPendingFcmToken } from './utils/fcmToken';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import OnboardingFlow from './components/onboarding/OnboardingFlow';
+import WelcomeBackFlow from './components/reengagement/WelcomeBackFlow';
 import ModeNudgeToast from './components/onboarding/ModeNudgeToast';
 import UpgradeChecklistModal from './components/onboarding/UpgradeChecklistModal';
 import { useAppContext } from './context/AppContext';
@@ -334,6 +335,8 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingResumeStep, setOnboardingResumeStep] = useState(ONBOARDING_STEPS.SPLASH);
   const [onboardingTrackingMode, setOnboardingTrackingMode] = useState('simple');
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  const [welcomeBackGap, setWelcomeBackGap] = useState(null);
   const [showTrialEndedModal, setShowTrialEndedModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
@@ -742,6 +745,73 @@ function App() {
     return () => clearTimeout(timeoutId);
   }, [user]);
 
+  // Welcome-back / re-engagement: returning users inactive 30+ days
+  useEffect(() => {
+    if (!user?.uid) {
+      setShowWelcomeBack(false);
+      setWelcomeBackGap(null);
+      return;
+    }
+    if (showOnboarding) return;
+
+    let cancelled = false;
+
+    const evaluateGap = async (gap) => {
+      if (cancelled || !gap || !user?.uid) return;
+      try {
+        const { loadUserState } = await import('./services/cloudStorage');
+        const { shouldShowWelcomeBack } = await import('./utils/reengagement');
+        const userState = await loadUserState(user.uid);
+        if (cancelled) return;
+        if (!userState?.hasOnboarded) return;
+        if (shouldShowWelcomeBack(gap, userState?.reengagement)) {
+          setWelcomeBackGap(gap);
+          setShowWelcomeBack(true);
+        }
+      } catch (e) {
+        console.warn('Welcome-back check failed:', e);
+      }
+    };
+
+    const setup = async () => {
+      const {
+        subscribeToGapResult,
+        getPendingGapResult,
+        setPendingGapResult,
+      } = await import('./utils/reengagement');
+
+      const unsub = subscribeToGapResult((gap) => {
+        if (gap?.uid === user.uid) evaluateGap(gap);
+      }, user.uid);
+
+      const pending = getPendingGapResult(user.uid);
+      if (pending) {
+        evaluateGap(pending);
+      } else {
+        // Session restore path — loginUser may not have run
+        try {
+          const { trackEngagement } = await import('./utils/engagementTracking');
+          const gap = await trackEngagement(user.uid, 'login');
+          if (gap && !cancelled) {
+            setPendingGapResult(user.uid, gap);
+          }
+        } catch (_) {}
+      }
+
+      return unsub;
+    };
+
+    let unsub = () => {};
+    setup().then((fn) => {
+      if (typeof fn === 'function') unsub = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [user?.uid, showOnboarding]);
+
   // Re-consent: show modal when user has not accepted current ToS/Privacy versions (uses Firebase for cross-device)
   useEffect(() => {
     if (!user?.uid || !location.pathname.startsWith('/app')) return;
@@ -843,6 +913,21 @@ function App() {
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
     sessionStorage.setItem('tpp_welcome_shown', 'true');
+  };
+
+  const handleWelcomeBackComplete = () => {
+    setShowWelcomeBack(false);
+    setWelcomeBackGap(null);
+  };
+
+  const handleWelcomeBackDecline = () => {
+    setShowWelcomeBack(false);
+    setWelcomeBackGap(null);
+  };
+
+  const handleWelcomeBackDismiss = () => {
+    setShowWelcomeBack(false);
+    // Keep gap so it can reappear next session via pending status
   };
 
 
@@ -957,6 +1042,16 @@ function App() {
         initialStep={onboardingResumeStep}
         initialTrackingMode={onboardingTrackingMode}
         onComplete={handleOnboardingComplete}
+      />
+      <WelcomeBackFlow
+        open={showWelcomeBack}
+        theme={theme}
+        userId={user?.uid}
+        lastGapDate={welcomeBackGap?.previousLastActiveDate}
+        daysAway={welcomeBackGap?.daysSinceLastActive}
+        onComplete={handleWelcomeBackComplete}
+        onDecline={handleWelcomeBackDecline}
+        onDismiss={handleWelcomeBackDismiss}
       />
       <ModeNudgeToast theme={theme} />
       <UpgradeChecklistModal theme={theme} />

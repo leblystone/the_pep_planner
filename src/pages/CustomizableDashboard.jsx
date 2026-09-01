@@ -3,25 +3,16 @@ import { useOutletContext, useNavigate } from 'react-router-dom';
 import { ChevronUp, ChevronDown, Flame, HelpCircle } from 'lucide-react';
 import { ListChecks } from '@phosphor-icons/react';
 import {
-  WarningDiamond,
-  Note as PhNote,
   Drop,
   Scales,
-  Syringe,
   TrendUp,
   TrendDown,
-  ShoppingCart,
-  Package,
-  Plus,
-  X,
-  Microscope,
+  Check,
 } from '@phosphor-icons/react';
 import SideEffectsQuickSheet from '../components/sideeffects/SideEffectsQuickSheet';
 import ProtocolNotesSheet from '../components/sideeffects/ProtocolNotesSheet';
 import { loadSideEffects } from '../utils/sideEffectsLog';
 import { getProtocolAccentHex } from '../utils/protocolColors';
-import { getBuddyCardTint, OWNER_SELF } from '../utils/buddies';
-import { ProtocolPurposeGlyph } from '../utils/protocolPurposeIcons';
 import { useAppContext } from '../context/AppContext';
 import { useBadgeStats } from '../utils/badges';
 import { useSubscriptionAccess, useTierAccess } from '../utils/useSubscriptionAccess';
@@ -34,11 +25,13 @@ import {
   loadDashboardLayout, 
   saveDashboardLayout,
   loadDashboardLayoutFromCloud,
+  ensureProtocolsCardWidget,
+  PROTOCOLS_CARD_WIDGET,
   MANAGE_WIDGETS_VERSION,
   getSizeConfig,
   WIDGET_TYPES,
-  RETIRED_DASHBOARD_WIDGET_TYPES,
 } from '../utils/dashboardCustomization';
+import ActiveProtocolsHomeCard from '../components/dashboard/ActiveProtocolsHomeCard';
 import { fixDataInconsistencies, diagnoseDashboardData } from '../utils/dataCleanup';
 import { getLocalDateString } from '../utils/date';
 import { getMergedMetricForDay, upsertMetricForDay, metricDateKey } from '../utils/metricsDisplay';
@@ -150,14 +143,7 @@ export default function CustomizableDashboard() {
   );
 
   // Dashboard customization state
-  const [widgets, setWidgets] = useState(() => {
-    const loaded = loadDashboardLayout();
-    // Ensure the hardcoded Active Protocols card participates in the widget system
-    if (!loaded.find(w => w.id === 'protocols_card')) {
-      loaded.unshift({ id: 'protocols_card', type: 'protocols_card', enabled: true, size: 'medium', position: { x: 0, y: -1 } });
-    }
-    return loaded;
-  });
+  const [widgets, setWidgets] = useState(() => ensureProtocolsCardWidget(loadDashboardLayout()));
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
   const [groupBuysEnabled, setGroupBuysEnabled] = useState(true);
@@ -172,7 +158,7 @@ export default function CustomizableDashboard() {
   }, []);
 
   useEffect(() => {
-    const reloadLayout = () => setWidgets(loadDashboardLayout());
+    const reloadLayout = () => setWidgets(ensureProtocolsCardWidget(loadDashboardLayout()));
     window.addEventListener('tpp:dashboard-layout-changed', reloadLayout);
     window.addEventListener('tpp:tracking-mode-changed', reloadLayout);
     return () => {
@@ -190,10 +176,10 @@ export default function CustomizableDashboard() {
       const cloudWidgets = await loadDashboardLayoutFromCloud(uid);
       if (cancelled) return;
       if (cloudWidgets) {
-        setWidgets(cloudWidgets);
+        setWidgets(ensureProtocolsCardWidget(cloudWidgets));
       } else {
         // Seed cloud with current local layout so other devices can pick it up
-        const local = loadDashboardLayout();
+        const local = ensureProtocolsCardWidget(loadDashboardLayout());
         saveDashboardLayout(local, { userId: uid });
       }
     })();
@@ -365,23 +351,44 @@ export default function CustomizableDashboard() {
     };
   }, []);
 
-  // Compute dashboard data: all incoming orders (placed / in transit / recently delivered) for widget pagination
+  // Incoming Peptides (Advanced): show only while an order is active, plus 3 days after delivery
   const incomingOrders = useMemo(() => {
     if (!orders || orders.length === 0) return [];
-    const now = new Date();
-    const threeDaysAgo = new Date(now);
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-    const activeOrders = orders.filter(o => {
+
+    const startOfLocalDay = (value) => {
+      const d = value instanceof Date ? new Date(value) : new Date(value);
+      if (Number.isNaN(d.getTime())) return null;
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+
+    const cutoff = startOfLocalDay(new Date());
+    if (!cutoff) return [];
+    cutoff.setDate(cutoff.getDate() - 3);
+
+    const activeOrders = orders.filter((o) => {
       const status = (o.status || '').toLowerCase();
+      if (status.includes('cancel')) return false;
+
       const isDelivered = status.includes('delivered');
-      if (!isDelivered) return true;
-      if (o.deliveryDate) return new Date(o.deliveryDate) >= threeDaysAgo;
-      if (o.date) return new Date(o.date) >= threeDaysAgo;
-      return false;
+      if (!isDelivered) return true; // Order Placed / In Transit / Shipped
+
+      // Delivered: keep on dashboard for 3 extra days, then drop
+      const deliveredRaw = o.deliveryDate || o.dateDelivered || o.deliveredAt;
+      const deliveredDay = deliveredRaw ? startOfLocalDay(deliveredRaw) : null;
+      if (!deliveredDay) return false;
+      return deliveredDay >= cutoff;
     });
+
     if (activeOrders.length === 0) return [];
-    activeOrders.sort((a, b) => new Date(a.deliveryDate || a.date || 0) - new Date(b.deliveryDate || b.date || 0));
-    return activeOrders.map(o => ({
+
+    activeOrders.sort((a, b) => {
+      const dateA = new Date(a.deliveryDate || a.shipDate || a.date || 0);
+      const dateB = new Date(b.deliveryDate || b.shipDate || b.date || 0);
+      return dateA - dateB;
+    });
+
+    return activeOrders.map((o) => ({
       id: o.id,
       peptide: o.items?.[0]?.name || 'Unknown Item',
       mg: o.items?.[0]?.mg || 'N/A',
@@ -390,7 +397,7 @@ export default function CustomizableDashboard() {
       shipDate: o.shipDate || o.date,
       deliveryDate: o.deliveryDate,
       date: o.date,
-      tracking: o.tracking
+      tracking: o.tracking,
     }));
   }, [orders]);
 
@@ -1121,6 +1128,11 @@ export default function CustomizableDashboard() {
       ];
       if (simpleHidden.includes(w.type)) return false;
     }
+
+    // Advanced: Incoming Peptides only when there is an active order (or ≤3 days post-delivery)
+    if (w.type === WIDGET_TYPES.UPCOMING_ORDER && incomingOrders.length === 0) {
+      return false;
+    }
     
     // Hide analytics-related widgets when analytics is disabled (Advanced mode)
     if (!analyticsEnabled && w.type === WIDGET_TYPES.ANALYTICS) {
@@ -1182,60 +1194,17 @@ export default function CustomizableDashboard() {
   const topTasksWidget = enabledWidgetsForGrid.find(w => w.type === WIDGET_TYPES.TASKS) || null;
   const mainGridWidgets = enabledWidgetsForGrid.filter(w => !homeHiddenTypes.has(w.type));
 
-  // ── Stockpile computed values ─────────────────────────────────────────────
-  const lowStockCount = useMemo(() => (stockpile || []).filter(s => Number(s.quantity) <= 1).length, [stockpile]);
-  const stockpileValueFormatted = useMemo(() => {
-    const total = (stockpile || []).reduce((sum, s) => sum + (Number(s.price) || 0) * (Number(s.quantity) || 0), 0);
-    return `$${total.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-  }, [stockpile]);
-  const stockpileHealthPct = useMemo(() => {
-    if (!stockpile || stockpile.length === 0) return null;
-    const healthy = stockpile.filter(s => Number(s.quantity) > 1).length;
-    return Math.round((healthy / stockpile.length) * 100);
-  }, [stockpile]);
-
-  // ── Home insight cards ────────────────────────────────────────────────────
-  const homeInsightCards = useMemo(() => {
-    const nextDoseProtocol = activeProtocols[0] || null;
-    return [
-      {
-        key: 'protocols',
-        label: 'Active Protocols',
-        value: activeProtocols.length,
-        hint: activeProtocols.length === 0 ? 'No active protocols' : `${activeProtocols.length} running`,
-        to: '/app/protocols',
-        accent: '#6B8FA3',
-        progress: null,
-      },
-      {
-        key: 'dose',
-        label: 'Next Scheduled Dose',
-        value: nextDoseProtocol?.protocolName || '—',
-        hint: nextDoseProtocol?.purpose || 'No active protocols',
-        to: '/app/protocols',
-        accent: '#7F9E95',
-        progress: null,
-      },
-      {
-        key: 'stockpile',
-        label: lowStockCount > 0 ? 'Restock Needed' : 'Stockpile',
-        value: lowStockCount > 0 ? `${lowStockCount} low` : stockpileValueFormatted,
-        hint: lowStockCount > 0 ? 'Items running low' : 'All stocked up',
-        to: '/app/stockpile',
-        accent: lowStockCount > 0 ? '#C47A5A' : '#7B6B9C',
-        progress: stockpileHealthPct,
-      },
-    ];
-  }, [protocols, lowStockCount, stockpileValueFormatted, stockpileHealthPct]);
-
   return (
     <>
       {/* Tips Banner - Compact header tips for new users */}
       <DashboardTipsBanner theme={theme} />
 
       {/* ── Unified dashboard grid — all items same width ─────────────────── */}
-      <div className="w-full max-w-full min-w-0" style={{ paddingBottom: 'calc(3.5rem + 0.75rem)' }}>
-        <div className="dashboard-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4 sm:gap-5 auto-rows-min px-3 sm:px-5 md:px-6 lg:px-8 py-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
+      <div
+        className="w-full max-w-full min-w-0 px-0 md:px-6 lg:px-8"
+        style={{ paddingBottom: 'calc(3.5rem + 0.75rem)' }}
+      >
+        <div className="dashboard-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4 sm:gap-5 auto-rows-min py-3" style={{ fontFamily: 'Poppins, sans-serif' }}>
 
           {/* Today's Research — pinned first, never remove */}
           {topTasksWidget && (
@@ -1301,235 +1270,24 @@ export default function CustomizableDashboard() {
             </DashboardWidget>
           )}
 
-          {/* Active Protocols card */}
-          {(() => {
-            const card = homeInsightCards.find(c => c.key === 'protocols');
-            const protocolsWidget = widgets.find(w => w.id === 'protocols_card');
-            if (!card || protocolsWidget?.enabled === false || simpleMode) return null;
-            const activeProtocols = (protocols || []).filter(p => p.active !== false);
-            const previewProtocols = activeProtocols;
-            const moreCount = 0;
-            return (
-              <DashboardWidget
-                key="home-protocols"
-                widget={protocolsWidget || { id: 'protocols_card', type: 'protocols_card', enabled: true, size: 'medium', position: { x: 0, y: -1 } }}
+          {/* Active Protocols — Advanced mode only, pinned right after Today's Research */}
+          {!simpleMode && (
+            <DashboardWidget
+              key="home-protocols"
+              widget={widgets.find(w => w.id === 'protocols_card') || PROTOCOLS_CARD_WIDGET}
+              theme={theme}
+              gridClassName="col-span-1 sm:col-span-2"
+            >
+              <ActiveProtocolsHomeCard
                 theme={theme}
-                gridClassName="col-span-1 sm:col-span-2"
-              >
-              <div
-                className="rounded-2xl p-4 sm:p-5 text-left w-full overflow-hidden h-full"
-                style={{ backgroundColor: theme.cardBackground }}
-              >
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <h3 className="text-base font-bold flex items-center gap-2 truncate min-w-0" style={{ color: theme.text }}>
-                    Active Protocols
-                    <Microscope size={22} weight="duotone" color={theme.primary} className="flex-shrink-0" aria-hidden />
-                  </h3>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {activeProtocols.length > 0 && (
-                      <span
-                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                        style={{ backgroundColor: `${theme.primary}18`, color: theme.primary }}
-                      >
-                        {activeProtocols.length} total
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => navigate(card.to)}
-                      className="text-[10px] sm:text-[11px] font-semibold rounded-lg px-2 py-0.5 transition-colors hover:opacity-90 touch-manipulation"
-                      style={{ color: theme.isDark ? '#9BC9A4' : '#1f4d2c' }}
-                    >
-                      View all
-                    </button>
-                  </div>
-                </div>
-                {activeProtocols.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => navigate(card.to)}
-                    className="w-full flex items-center gap-3 text-left rounded-xl p-1 -m-1 transition-transform active:scale-[0.99] touch-manipulation border-0 cursor-pointer bg-transparent"
-                  >
-                    <div className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${card.accent}18`, color: card.accent }}>
-                      <Microscope size={22} weight="duotone" color={card.accent} />
-                    </div>
-                    <div>
-                      <p className="text-base font-bold" style={{ color: theme.text }}>None</p>
-                      <p className="text-[11px]" style={{ color: theme.textLight }}>No active protocols — tap to open Protocols</p>
-                    </div>
-                  </button>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {previewProtocols.map((p) => {
-                      const color = getProtocolAccentHex(p);
-                      const isBuddyOwned = p?.ownerId && p.ownerId !== OWNER_SELF;
-                      const buddyTint = isBuddyOwned ? getBuddyCardTint(color, theme?.isDark) : null;
-                      const rowText = isBuddyOwned ? 'rgba(255,255,255,0.9)' : theme.text;
-                      const rowTextMuted = isBuddyOwned ? 'rgba(255,255,255,0.65)' : `${color}cc`;
-                      const recentFx = allSideEffects
-                        .filter(e => e.protocolId === p.id && e.effect !== 'none')
-                        .slice(0, 3);
-                      const chipShadow = theme.isDark
-                        ? `0 2px 14px rgba(0,0,0,0.45), 0 0 0 1px ${color}42, inset 0 1px 0 ${color}38, inset 0 -1px 0 rgba(0,0,0,0.35)`
-                        : `0 2px 10px ${color}28, 0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px ${color}35, inset 0 1px 0 rgba(255,255,255,0.75), inset 0 -1px 0 ${color}18`;
-                      const chipHoverShadow = theme.isDark
-                        ? `0 4px 18px rgba(0,0,0,0.5), 0 0 0 1px ${color}55, inset 0 1px 0 ${color}45`
-                        : `0 4px 16px ${color}35, 0 1px 3px rgba(0,0,0,0.08), 0 0 0 1px ${color}45, inset 0 1px 0 rgba(255,255,255,0.85)`;
-                      const rowStyle = isBuddyOwned && buddyTint
-                        ? { backgroundColor: buddyTint.backgroundColor, boxShadow: buddyTint.boxShadow }
-                        : {
-                            background: `linear-gradient(165deg, ${color}40 0%, ${color}1f 42%, ${color}0f 100%)`,
-                            boxShadow: chipShadow,
-                          };
-                      return (
-                        <div
-                          key={p.id}
-                          className="rounded-xl flex items-center gap-2.5 px-2.5 py-2 transition-[box-shadow] duration-200 ease-out w-full min-w-0"
-                          style={rowStyle}
-                          onMouseEnter={isBuddyOwned ? undefined : (e) => { e.currentTarget.style.boxShadow = chipHoverShadow; }}
-                          onMouseLeave={isBuddyOwned ? undefined : (e) => { e.currentTarget.style.boxShadow = chipShadow; }}
-                        >
-                          {/* Left: tappable icon + name → navigates to protocol */}
-                          <button
-                            type="button"
-                            onClick={() => navigate('/app/protocols', { state: { highlightProtocolId: p.id } })}
-                            className="group flex items-center gap-2.5 min-w-0 flex-1 border-0 bg-transparent p-0 cursor-pointer touch-manipulation active:scale-[0.98] focus-visible:outline-none"
-                            aria-label={`Open ${p.protocolName || 'protocol'}`}
-                          >
-                            <div
-                              className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-[1.04]"
-                              style={{
-                                background: isBuddyOwned
-                                  ? `linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.2) 100%)`
-                                  : `linear-gradient(180deg, ${color}55 0%, ${color}30 55%, ${color}1c 100%)`,
-                                boxShadow: theme.isDark
-                                  ? `inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.35)`
-                                  : `inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 ${color}35`,
-                                color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color,
-                              }}
-                            >
-                              <ProtocolPurposeGlyph
-                                protocol={p}
-                                size={22}
-                                className="drop-shadow-[0_1px_1px_rgba(0,0,0,0.12)]"
-                                style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }}
-                              />
-                            </div>
-                            <div className="min-w-0 flex items-center gap-1.5">
-                              <p className="text-[11px] sm:text-xs font-semibold truncate leading-tight tracking-tight" style={{ color: rowText }}>{p.protocolName || 'Untitled'}</p>
-                              {isBuddyOwned ? (
-                                <span
-                                  className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                                  style={{ color: color, backgroundColor: `${color}35`, border: `1px solid ${color}55` }}
-                                >
-                                  Buddy
-                                </span>
-                              ) : (
-                                <span
-                                  className="w-2 h-2 rounded-full shrink-0 ring-2 ring-white/30 dark:ring-black/20 shadow-sm"
-                                  style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}99` }}
-                                  aria-hidden
-                                />
-                              )}
-                            </div>
-                          </button>
-
-                          {/* Right: fx pills (if any) + action buttons — all linked to THIS protocol */}
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {recentFx.length > 0 && (
-                              <div className="flex flex-col items-end gap-0.5 max-w-[min(140px,35vw)] sm:max-w-[160px]">
-                                {recentFx.slice(0, 2).map(e => {
-                                  const sev = e.severity;
-                                  const sevColor = sev === 'severe' ? '#ef4444' : sev === 'moderate' ? '#f59e0b' : '#22c55e';
-                                  return (
-                                    <span
-                                      key={e.id}
-                                      className="text-[8px] font-bold px-1.5 py-0.5 rounded-full truncate max-w-full"
-                                      style={{ backgroundColor: `${sevColor}22`, color: sevColor, border: `1px solid ${sevColor}33` }}
-                                    >
-                                      {e.label || e.effect}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {/* Divider */}
-                            <div className="w-px h-6 shrink-0" style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.2)' : `${color}30` }} />
-
-                            {/* Side effect button — linked to this protocol */}
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setSideEffectProtocol(p); }}
-                              className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
-                              style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.1)' : `${color}15` }}
-                              title={`Log side effect for ${p.protocolName}`}
-                            >
-                              <WarningDiamond size={13} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
-                              <span className="text-[8px] font-semibold leading-none" style={{ color: rowTextMuted }}>Side effect</span>
-                            </button>
-
-                            {/* Notes button — linked to this protocol */}
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setNotesProtocol(p); }}
-                              className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
-                              style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.1)' : `${color}15` }}
-                              title={`Notes for ${p.protocolName}`}
-                            >
-                              <PhNote size={13} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
-                              <span className="text-[8px] font-semibold leading-none" style={{ color: rowTextMuted }}>Note</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {/* Bottom card actions — always general, never auto-linked to a protocol */}
-                    <div className="flex gap-2 pt-0.5 w-full">
-                      <button
-                        type="button"
-                        onClick={() => setSideEffectProtocol({ id: null, protocolName: null })}
-                        className="flex-1 rounded-xl py-2 text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
-                        style={{ color: theme.textLight, borderColor: theme.border || 'rgba(0,0,0,0.08)', backgroundColor: 'transparent' }}
-                      >
-                        <WarningDiamond size={11} weight="duotone" />
-                        Side effect
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNotesProtocol({ id: null, protocolName: null })}
-                        className="flex-1 rounded-xl py-2 text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
-                        style={{ color: theme.textLight, borderColor: theme.border || 'rgba(0,0,0,0.08)', backgroundColor: 'transparent' }}
-                      >
-                        <PhNote size={11} weight="duotone" />
-                        Notes
-                      </button>
-                    </div>
-                    {moreCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => navigate(card.to)}
-                        className="w-full rounded-xl py-2 px-2.5 text-center border-0 cursor-pointer text-[10px] sm:text-[11px] font-semibold transition-all duration-200 touch-manipulation hover:-translate-y-px active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-                        style={{
-                          color: theme.textLight,
-                          background: theme.isDark
-                            ? 'linear-gradient(165deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)'
-                            : 'linear-gradient(165deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.02) 100%)',
-                          boxShadow: theme.isDark
-                            ? '0 1px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)'
-                            : '0 1px 6px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.7)',
-                        }}
-                      >
-                        +{moreCount} more on Protocols
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              </DashboardWidget>
-            );
-          })()}
+                protocols={protocols}
+                allSideEffects={allSideEffects}
+                navigate={navigate}
+                onSideEffect={setSideEffectProtocol}
+                onNotes={setNotesProtocol}
+              />
+            </DashboardWidget>
+          )}
 
           {/* Regular widgets (Analytics, Compliance, etc.) */}
           {mainGridWidgets.map((widget, index) => {
@@ -1771,6 +1529,26 @@ export default function CustomizableDashboard() {
                 const rounded = Math.abs(n) >= 10 ? Math.round(n) : Math.round(n * 10) / 10;
                 return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(rounded)}%`;
               };
+              const saveWeightEntry = () => {
+                const val = parseFloat(weightInput);
+                if (!val || val <= 0) return;
+                setMetrics((prev) =>
+                  upsertMetricForDay(
+                    prev || [],
+                    {
+                      type: 'weight',
+                      label: 'Weight',
+                      value: val,
+                      weight: val,
+                      unit,
+                      date: getLocalDateString(),
+                    },
+                    { keepId: getMergedMetricForDay(prev || [], getLocalDateString())?.id || generateId() }
+                  )
+                );
+                setWeightInput('');
+                window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: `✓ ${val} ${unit} logged`, type: 'success' } }));
+              };
               return (
                 <div
                   className="col-span-1 rounded-2xl overflow-hidden relative cursor-pointer touch-manipulation"
@@ -1778,7 +1556,11 @@ export default function CustomizableDashboard() {
                   onClick={() => navigate('/app/insights?tab=metrics')}
                   role="button"
                   tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/app/insights?tab=metrics'); }}
+                  onKeyDown={(e) => {
+                    // Don't navigate when typing / saving in the weight field
+                    if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'BUTTON') return;
+                    if (e.key === 'Enter' || e.key === ' ') navigate('/app/insights?tab=metrics');
+                  }}
                 >
                   <div className="p-3 h-full flex flex-col">
                     <div className="flex items-center justify-between mb-2">
@@ -1786,42 +1568,14 @@ export default function CustomizableDashboard() {
                         <span className="text-sm font-semibold uppercase tracking-wide" style={{ color: theme.textLight }}>Weight</span>
                         <Scales size={18} weight="duotone" color={theme.primary} aria-hidden />
                       </div>
-                      {lastWeight?.date && !isDirty && (
+                      {lastWeight?.date && (
                         <span className="text-[10px]" style={{ color: theme.textLight }}>
                           {new Date(lastWeight.date.length === 10 ? lastWeight.date + 'T00:00:00' : lastWeight.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       )}
-                      {isDirty && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const val = parseFloat(weightInput);
-                            if (!val || val <= 0) return;
-                            setMetrics((prev) =>
-                              upsertMetricForDay(
-                                prev || [],
-                                {
-                                  type: 'weight',
-                                  label: 'Weight',
-                                  value: val,
-                                  weight: val,
-                                  unit,
-                                  date: getLocalDateString(),
-                                },
-                                { keepId: getMergedMetricForDay(prev || [], getLocalDateString())?.id || generateId() }
-                              )
-                            );
-                            setWeightInput('');
-                            window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: `✓ ${val} ${unit} logged`, type: 'success' } }));
-                          }}
-                          className="text-[10px] font-bold px-2.5 py-1 rounded-full touch-manipulation"
-                          style={{ backgroundColor: theme.primary, color: '#fff' }}
-                        >Save</button>
-                      )}
                     </div>
                     <div
-                      className="rounded-xl px-2.5 py-2 flex items-baseline gap-1.5 border"
+                      className="rounded-xl px-2.5 py-2 flex items-center gap-1.5 border"
                       style={{
                         backgroundColor: theme.isDark ? 'rgba(255,255,255,0.07)' : `${theme.primary}10`,
                         borderColor: `${theme.primary}38`,
@@ -1839,10 +1593,31 @@ export default function CustomizableDashboard() {
                         placeholder={lastValStr || 'Log New'}
                         value={weightInput}
                         onChange={(e) => setWeightInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          saveWeightEntry();
+                        }}
                         className="min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums outline-none w-full"
                         style={{ color: theme.text }}
                       />
-                      <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: theme.primary, opacity: 0.85 }}>{unit}</span>
+                      <span className="text-[11px] font-semibold flex-shrink-0 self-baseline" style={{ color: theme.primary, opacity: 0.85 }}>{unit}</span>
+                      {isDirty && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            saveWeightEntry();
+                          }}
+                          className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center touch-manipulation active:scale-90 transition-transform"
+                          style={{ backgroundColor: theme.primary, color: '#fff' }}
+                          aria-label="Save weight"
+                          title="Save"
+                        >
+                          <Check size={16} weight="bold" aria-hidden />
+                        </button>
+                      )}
                     </div>
 
                     {/* Footer: % change + absolute change vs previous log */}

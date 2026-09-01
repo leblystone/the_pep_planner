@@ -26,7 +26,7 @@ export default function AdminOverviewDashboard() {
     loadFeedback(false, { openOnly: true });
   }, [loadFeedback]);
 
-  // Full-bleed layout — no padding, no max-width
+  // Full-bleed so the inbox can use the full main column (no max-w-7xl gutters).
   useEffect(() => {
     if (setFullBleed) setFullBleed(true);
     return () => { if (setFullBleed) setFullBleed(false); };

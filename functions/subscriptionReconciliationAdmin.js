@@ -152,9 +152,22 @@ exports.adminRunSubscriptionReconciliation = onCall(
 
     const logs = await fetchReconciliationLogs(db, { runId, limit: 100 });
 
+    const ts = admin.firestore.FieldValue.serverTimestamp();
+
+    // Persist run history — every run recorded regardless of changes
+    await db.collection('reconciliationRuns').add({
+      runId,
+      trigger,
+      runBy,
+      platforms,
+      summary,
+      totalLogged,
+      ranAt: ts,
+    });
+
     await db.collection('systemMetrics').doc('subscriptionReconciliation').set(
       {
-        lastManualRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastManualRunAt: ts,
         lastManualRunBy: runBy,
         lastRunId: runId,
         summary,

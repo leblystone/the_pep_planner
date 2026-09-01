@@ -14,7 +14,8 @@ import {
   increment,
   addDoc,
   Timestamp,
-  onSnapshot
+  onSnapshot,
+  runTransaction,
 } from 'firebase/firestore';
 import { 
   createUserWithEmailAndPassword, 
@@ -36,6 +37,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db, auth } from '../config/firebase.js';
 import { encryptUserData, decryptUserData, hashPassword } from '../utils/encryption.js';
 import { getCurrentDeviceInfo } from '../utils/deviceDetection.js';
+import { COLLECTIONS } from '../config/collections.js';
 
 // ============================================================================
 // AUTHENTICATION
@@ -304,7 +306,12 @@ export async function registerUser(email, password, inviteCode) {
     // Per-user engagement: count first day (non-blocking)
     try {
       const { trackEngagement } = await import('../utils/engagementTracking');
-      trackEngagement(user.uid, 'login').catch(() => {});
+      const { setPendingGapResult } = await import('../utils/reengagement');
+      trackEngagement(user.uid, 'login')
+        .then((gap) => {
+          if (gap) setPendingGapResult(user.uid, gap);
+        })
+        .catch(() => {});
     } catch (_) {}
 
     return { user, userData };
@@ -397,7 +404,12 @@ export async function loginUser(email, password) {
         try { await updateAnalytics('userLogin'); } catch (_) {}
         try {
           const { trackEngagement } = await import('../utils/engagementTracking');
-          trackEngagement(user.uid, 'login').catch(() => {});
+          const { setPendingGapResult } = await import('../utils/reengagement');
+          trackEngagement(user.uid, 'login')
+            .then((gap) => {
+              if (gap) setPendingGapResult(user.uid, gap);
+            })
+            .catch(() => {});
         } catch (_) {}
       })
       .catch(() => {});
@@ -1567,6 +1579,175 @@ export async function respondToFeedback(feedbackId, responseText, userEmail) {
 // ============================================================================
 
 /**
+ * Ensure a feedback report has a linked support ticket thread (lazy create on first CRM reply).
+ * Does NOT use createSupportTicket (avoids merging into an unrelated open support ticket).
+ * @param {Object} feedbackItem - Feedback doc (id, userEmail, type/message fields)
+ * @returns {Promise<string>} ticketId
+ */
+export async function ensureFeedbackTicket(feedbackItem) {
+  const feedbackId = feedbackItem?.id;
+  if (!feedbackId) throw new Error('feedback id required');
+
+  const feedbackRef = doc(db, 'feedback', feedbackId);
+  const snap = await getDoc(feedbackRef);
+  if (!snap.exists()) throw new Error('Feedback not found');
+  const data = snap.data() || {};
+
+  if (data.linkedTicketId) return data.linkedTicketId;
+
+  const email = String(
+    feedbackItem.userEmail || feedbackItem._email || data.userEmail || data.email || ''
+  ).toLowerCase().trim();
+  if (!email) throw new Error('Feedback has no user email');
+
+  const typeRaw = String(
+    feedbackItem._type || feedbackItem.type || data.type || 'bug'
+  ).toLowerCase();
+  const type = typeRaw.includes('suggest') ? 'suggestion' : 'bug';
+  const message = String(
+    feedbackItem.message || feedbackItem.feedback || data.message || data.feedback || ''
+  ).trim();
+  const userName =
+    feedbackItem.userName || data.userName || email.split('@')[0];
+  const userId = feedbackItem.userId || data.userId || null;
+
+  let ticketNumber;
+  try {
+    const counterRef = doc(db, '_counters', 'supportTickets');
+    await runTransaction(db, async (transaction) => {
+      const counterDoc = await transaction.get(counterRef);
+      let currentCount = counterDoc.exists() ? (counterDoc.data().count || 0) : 0;
+      if (currentCount === 0) currentCount = 4;
+      else currentCount += 1;
+      ticketNumber = `Z${String(currentCount).padStart(3, '0')}`;
+      transaction.set(
+        counterRef,
+        { count: currentCount, lastUpdated: serverTimestamp() },
+        { merge: true }
+      );
+    });
+  } catch (err) {
+    console.warn('Ticket counter unavailable, using feedback-based number:', err?.message);
+    ticketNumber = `F${feedbackId.slice(-6).toUpperCase()}`;
+  }
+
+  const ticketRef = await addDoc(collection(db, 'supportTickets'), {
+    ticketNumber,
+    userEmail: email,
+    userId,
+    userName,
+    type,
+    subject: type === 'suggestion' ? 'Suggestion' : 'Bug Report',
+    status: 'in-progress',
+    feedbackId,
+    source: 'feedback',
+    skipGhostWorker: true,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    lastMessageAt: serverTimestamp(),
+    createdBy: 'admin-crm',
+  });
+
+  if (message) {
+    await addDoc(collection(db, 'supportTickets', ticketRef.id, 'messages'), {
+      message,
+      text: message,
+      senderType: 'user',
+      senderEmail: email,
+      senderName: userName,
+      createdAt: serverTimestamp(),
+      seededFromFeedback: true,
+    });
+  }
+
+  await updateDoc(feedbackRef, {
+    linkedTicketId: ticketRef.id,
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    const queueSnap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.USER_REPORTS_QUEUE),
+        where('feedbackId', '==', feedbackId),
+        limit(10)
+      )
+    );
+    await Promise.all(
+      queueSnap.docs.map((d) =>
+        updateDoc(d.ref, {
+          ticketId: ticketRef.id,
+          ticketNumber,
+        })
+      )
+    );
+  } catch (err) {
+    console.warn('Could not update queue ticketId for feedback:', err?.message);
+  }
+
+  return ticketRef.id;
+}
+
+/**
+ * Reply to a bug/suggestion via its linked support ticket (unified user inbox).
+ * Creates the ticket on first reply. Does not write adminMessages.
+ * @returns {Promise<{ ticketId: string, messageId: string }>}
+ */
+export async function replyToFeedbackViaTicket(feedbackItem, responseText) {
+  const text = String(responseText || '').trim();
+  if (!text) throw new Error('Response text required');
+  if (!feedbackItem?.id) throw new Error('feedback id required');
+
+  const ticketId = await ensureFeedbackTicket(feedbackItem);
+
+  const msgRef = await addDoc(collection(db, 'supportTickets', ticketId, 'messages'), {
+    message: text,
+    text,
+    senderType: 'admin',
+    senderName: 'The Pep Planner Team',
+    senderEmail: 'support@thepepplanner.com',
+    createdAt: serverTimestamp(),
+    sentVia: 'work-queue-feedback',
+  });
+
+  await updateDoc(doc(db, 'supportTickets', ticketId), {
+    lastMessageAt: serverTimestamp(),
+    lastAdminMessageAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    status: 'in-progress',
+  });
+
+  await updateFeedback(feedbackItem.id, {
+    status: 'reviewed',
+    adminResponse: text,
+    responseDate: new Date(),
+    linkedTicketId: ticketId,
+  });
+
+  try {
+    const queueSnap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.USER_REPORTS_QUEUE),
+        where('feedbackId', '==', feedbackItem.id),
+        limit(10)
+      )
+    );
+    await Promise.all(
+      queueSnap.docs.map((d) =>
+        updateDoc(d.ref, {
+          ticketId,
+          followUpSent: true,
+          followUpMessage: text,
+          followUpAt: serverTimestamp(),
+        })
+      )
+    );
+  } catch (_) { /* non-fatal */ }
+
+  return { ticketId, messageId: msgRef.id };
+}
+
+/**
  * Create a new support ticket
  * @param {Object} ticketData - The ticket data
  * @returns {Promise<string>} - The ticket ID
@@ -1997,6 +2178,11 @@ export async function getUserAdminMessages(userEmail) {
         id: doc.id,
         ...data
       };
+
+      // Unified inbox: CRM replies go to SupportChatModal tickets.
+      // From the Team chip keeps true one-way pushes + legacy untagged letters.
+      const src = message.source || null;
+      if (src && src !== 'one-way') return;
       
       // Check if message should be shown (unread or read within 24 hours)
       if (!message.userReadAt || message.userReadAt === null) {
@@ -2186,7 +2372,7 @@ export async function deleteAllAdminMessagesForUser(userEmail) {
  * @param {string} message - Message content
  * @returns {Promise<string>} - The message ID
  */
-export async function createAdminMessage(userEmail, message) {
+export async function createAdminMessage(userEmail, message, options = {}) {
   try {
     const functions = getFunctions();
     const createMessage = httpsCallable(functions, 'createAdminMessage');
@@ -2194,7 +2380,8 @@ export async function createAdminMessage(userEmail, message) {
     console.log('📨 Calling createAdminMessage function...');
     const result = await createMessage({
       userEmail: userEmail.toLowerCase(),
-      message: message.trim()
+      message: message.trim(),
+      source: options.source || 'one-way',
     });
     
     console.log('📨 Function response:', result);

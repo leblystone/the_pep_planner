@@ -14,7 +14,7 @@ const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'tpp
 const FUNCTIONS_BASE = `https://us-central1-${PROJECT_ID}.cloudfunctions.net`;
 const OAUTH_CALLBACK_URL = `${FUNCTIONS_BASE}/marketplaceOAuthCallback`;
 const BASE_URL = process.env.BASE_URL || 'https://thepepplanner.app';
-const ADMIN_RETURN_URL = `${BASE_URL}/admin/shop/marketplaces`;
+const ADMIN_RETURN_URL = `${BASE_URL}/admin/shop/products?view=marketplaces`;
 
 const ADMIN_EMAILS = [
   'lebrockmaldonado@gmail.com',
@@ -169,17 +169,21 @@ async function tiktokSignedRequest(path, method, body, credentials, token) {
   const appSecret = credentials.clientSecret;
   const accessToken = token.accessToken;
   const shopCipher = token.shopCipher || '';
+  const shopId = token.shopId ? String(token.shopId) : '';
 
   const params = new URLSearchParams({
     app_key: appKey,
     timestamp: String(timestamp),
-    shop_cipher: shopCipher,
+    version: '202309',
     access_token: accessToken,
   });
+  if (shopCipher) params.set('shop_cipher', shopCipher);
+  if (shopId) params.set('shop_id', shopId);
 
   const sortedKeys = [...params.keys()].sort();
   const paramStr = sortedKeys.map((k) => `${k}${params.get(k)}`).join('');
-  const signInput = `${appSecret}${path}${paramStr}${method === 'POST' && body ? JSON.stringify(body) : ''}${appSecret}`;
+  const bodyStr = method !== 'GET' && body ? JSON.stringify(body) : '';
+  const signInput = `${appSecret}${path}${paramStr}${bodyStr}${appSecret}`;
   const sign = crypto.createHmac('sha256', appSecret).update(signInput).digest('hex');
 
   params.set('sign', sign);
@@ -187,8 +191,11 @@ async function tiktokSignedRequest(path, method, body, credentials, token) {
   const url = `https://open-api.tiktokglobalshop.com${path}?${params.toString()}`;
   const resp = await fetch(url, {
     method,
-    headers: { 'Content-Type': 'application/json' },
-    body: method === 'POST' && body ? JSON.stringify(body) : undefined,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-tts-access-token': accessToken,
+    },
+    body: bodyStr || undefined,
   });
 
   const data = await resp.json();
@@ -205,19 +212,51 @@ async function updateTikTokProductStock(productId, stock, token) {
   if (!credentials) throw new Error('TikTok app credentials not configured');
 
   const refreshed = await refreshTokenIfNeeded('tiktok') || token;
+  if (!refreshed?.accessToken) throw new Error('TikTok shop not connected');
+  if (!refreshed.shopCipher) {
+    throw new Error('TikTok shop_cipher missing — reconnect TikTok in Admin → Marketplaces');
+  }
 
-  await tiktokSignedRequest(
-    '/product/202309/products/stocks',
-    'POST',
-    {
-      product_id: productId,
-      skus: [{ available_stock: Math.max(0, stock) }],
-    },
+  const qty = Math.max(0, Number(stock) || 0);
+  const productData = await tiktokSignedRequest(
+    `/product/202309/products/${productId}`,
+    'GET',
+    null,
     credentials,
     refreshed,
   );
 
-  return { productId, stock };
+  const skus = productData?.skus || [];
+  if (!skus.length) {
+    throw new Error(`TikTok product ${productId} has no SKUs to update`);
+  }
+
+  const updateSkus = skus.map((sku) => {
+    const skuId = sku.id || sku.sku_id;
+    if (!skuId) throw new Error(`TikTok product ${productId} has a SKU without an id`);
+
+    const existingInventory = sku.stock_infos || sku.inventory || [];
+    const inventory = existingInventory.length
+      ? existingInventory.map((inv) => {
+          const entry = { quantity: qty };
+          const warehouseId = inv.warehouse_id || inv.warehouseId;
+          if (warehouseId) entry.warehouse_id = warehouseId;
+          return entry;
+        })
+      : [{ quantity: qty }];
+
+    return { id: String(skuId), inventory };
+  });
+
+  await tiktokSignedRequest(
+    `/product/202309/products/${productId}/inventory/update`,
+    'POST',
+    { skus: updateSkus },
+    credentials,
+    refreshed,
+  );
+
+  return { productId, stock: qty, skuCount: updateSkus.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -464,30 +503,70 @@ exports.syncAllMarketplaceStock = onCall({ cors: true }, async (request) => {
     for (const docSnap of snap.docs) {
       const data = docSnap.data();
       const platformIds = data.platformIds || {};
-      if (!platformIds.etsy && !platformIds.tiktok) {
+      const hasEtsy = String(platformIds.etsy || '').trim();
+      const hasTiktok = String(platformIds.tiktok || '').trim();
+      if (!hasEtsy && !hasTiktok) {
         results.push({ productId: docSnap.id, name: data.name, status: 'skipped', reason: 'no platform IDs' });
         continue;
       }
-      try {
-        await syncStockToAllPlatforms(docSnap.id);
-        results.push({ productId: docSnap.id, name: data.name, status: 'synced', stock: data.stock ?? 0 });
-      } catch (err) {
-        logger.error(`Sync failed for ${docSnap.id}:`, err);
-        results.push({ productId: docSnap.id, name: data.name, status: 'error', error: err.message });
+
+      const syncResult = await syncStockToAllPlatforms(docSnap.id);
+      const platformErrors = [];
+      if (syncResult.etsy?.ok === false) platformErrors.push(`Etsy: ${syncResult.etsy.error}`);
+      if (syncResult.tiktok?.ok === false) platformErrors.push(`TikTok: ${syncResult.tiktok.error}`);
+
+      const syncedPlatforms = [
+        syncResult.etsy?.ok && 'etsy',
+        syncResult.tiktok?.ok && 'tiktok',
+      ].filter(Boolean);
+
+      if (platformErrors.length) {
+        results.push({
+          productId: docSnap.id,
+          name: data.name,
+          status: syncedPlatforms.length ? 'partial' : 'error',
+          stock: data.stock ?? 0,
+          syncedPlatforms,
+          error: platformErrors.join(' · '),
+          platforms: syncResult,
+        });
+      } else if (syncedPlatforms.length) {
+        results.push({
+          productId: docSnap.id,
+          name: data.name,
+          status: 'synced',
+          stock: data.stock ?? 0,
+          syncedPlatforms,
+          platforms: syncResult,
+        });
+      } else {
+        results.push({
+          productId: docSnap.id,
+          name: data.name,
+          status: 'skipped',
+          reason: 'no linked platforms to sync',
+        });
       }
     }
 
     const synced = results.filter((r) => r.status === 'synced').length;
+    const partial = results.filter((r) => r.status === 'partial').length;
     const errors = results.filter((r) => r.status === 'error').length;
-    const skipped = results.length - synced - errors;
+    const skipped = results.filter((r) => r.status === 'skipped').length;
+    const errorSamples = results
+      .filter((r) => r.status === 'error' || r.status === 'partial')
+      .slice(0, 5)
+      .map((r) => ({ name: r.name, error: r.error }));
 
     // Use Timestamp.now() for history — serverTimestamp() cannot be used inside arrayUnion
     const syncedAt = admin.firestore.Timestamp.now();
     const syncRecord = {
       syncedAt,
       synced,
+      partial,
       errors,
       skipped,
+      errorSamples,
       triggeredBy: request.auth?.token?.email || 'admin',
     };
     await admin.firestore().doc('_config/stockSyncHistory').set(
@@ -498,7 +577,7 @@ exports.syncAllMarketplaceStock = onCall({ cors: true }, async (request) => {
       { merge: true },
     );
 
-    return { ok: true, synced, errors, skipped, results };
+    return { ok: true, synced, partial, errors, skipped, errorSamples, results };
   } catch (err) {
     logger.error('syncAllMarketplaceStock failed:', err);
     throw new HttpsError('internal', err.message || 'Stock sync failed');

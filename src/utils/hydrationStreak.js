@@ -3,6 +3,8 @@
  * Stored in localStorage (tpprover_hydration_streak_v1), independent of water tracker shape.
  */
 
+import { getLocalDateString } from './date';
+
 export const HYDRATION_STREAK_STORAGE_KEY = 'tpprover_hydration_streak_v1';
 
 function formatDateKey(d) {
@@ -41,6 +43,33 @@ function getStateTimestamp(state) {
   return 0;
 }
 
+/**
+ * A streak stays alive only if the last goal-met day was today or yesterday.
+ * Anything older means at least one full day was missed → streak is broken.
+ */
+export function reconcileHydrationStreakState(state, todayKey = getLocalDateString()) {
+  const s = normalizeState(state);
+  if (s.streak <= 0) {
+    return s.lastCountedDate
+      ? { streak: 0, lastCountedDate: null, updatedAt: s.updatedAt || new Date().toISOString() }
+      : s;
+  }
+  if (!s.lastCountedDate) {
+    return { streak: 0, lastCountedDate: null, updatedAt: s.updatedAt || new Date().toISOString() };
+  }
+
+  const yesterday = addDaysToKey(todayKey, -1);
+  if (s.lastCountedDate === todayKey || s.lastCountedDate === yesterday) {
+    return s;
+  }
+
+  return {
+    streak: 0,
+    lastCountedDate: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function loadState() {
   try {
     const raw = localStorage.getItem(HYDRATION_STREAK_STORAGE_KEY);
@@ -49,6 +78,19 @@ function loadState() {
   } catch {
     return { streak: 0, lastCountedDate: null };
   }
+}
+
+/** Load + expire stale streaks. Optionally persist the broken state so UI/cloud stay honest. */
+function loadReconciledState({ persist = true } = {}) {
+  const loaded = loadState();
+  const reconciled = reconcileHydrationStreakState(loaded);
+  const changed =
+    reconciled.streak !== loaded.streak ||
+    reconciled.lastCountedDate !== loaded.lastCountedDate;
+  if (persist && changed) {
+    saveState(reconciled, { dispatch: true, source: 'reconcile' });
+  }
+  return reconciled;
 }
 
 // Cloud sync happens through AppContext's guarded, queued auto-sync, triggered
@@ -96,25 +138,28 @@ export function countHydrationGoalDays(waterData) {
 }
 
 export function getHydrationStreak() {
-  return loadState().streak;
+  return loadReconciledState().streak;
 }
 
 export function getHydrationStreakState() {
-  return loadState();
+  return loadReconciledState();
 }
 
 export function getHydrationStreakStateForSave() {
-  const state = loadState();
-  return state.streak > 0 || state.lastCountedDate ? state : {};
+  const state = loadReconciledState();
+  // Persist explicit zeros (with updatedAt) so cloud doesn't resurrect a broken streak
+  if (state.streak > 0 || state.lastCountedDate || state.updatedAt) return state;
+  return {};
 }
 
 /**
  * Merge two hydration streak states — the one with the more recent lastCountedDate wins,
  * then falls back to updatedAt, then higher streak count.
+ * Both sides are reconciled first so expired streaks can't win.
  */
 export function mergeHydrationStreak(localState, cloudState) {
-  const local = normalizeState(localState);
-  const cloud = normalizeState(cloudState);
+  const local = reconcileHydrationStreakState(normalizeState(localState));
+  const cloud = reconcileHydrationStreakState(normalizeState(cloudState));
 
   const getDateTs = (s) => {
     if (!s || typeof s.lastCountedDate !== 'string') return 0;
@@ -138,15 +183,16 @@ export function mergeHydrationStreak(localState, cloudState) {
 
 export function restoreHydrationStreakFromCloud(cloudState) {
   const merged = mergeHydrationStreak(loadState(), cloudState);
-  saveState(merged, { dispatch: true, source: 'cloud-sync' });
-  return merged;
+  const reconciled = reconcileHydrationStreakState(merged);
+  saveState(reconciled, { dispatch: true, source: 'cloud-sync' });
+  return reconciled;
 }
 
 /**
  * @returns {{ streak: number, lastCountedDate: string|null, streakStartDate: string|null }}
  */
 export function getHydrationStreakData() {
-  const state = loadState();
+  const state = loadReconciledState();
   let streakStartDate = null;
   if (state.lastCountedDate && state.streak > 0) {
     streakStartDate = addDaysToKey(state.lastCountedDate, -(state.streak - 1));
@@ -161,7 +207,8 @@ export function getHydrationStreakData() {
 export function maybeRegisterHydrationGoalMet(dateKey, amount, goal) {
   const g = Number(goal) || 0;
   const a = Number(amount) || 0;
-  const state = loadState();
+  // Expire first so a stale counter doesn't get incremented as if unbroken
+  const state = loadReconciledState();
   if (g <= 0 || a < g) {
     return { streak: state.streak, incremented: false, celebrated: false };
   }

@@ -55,7 +55,9 @@ export const RETIRED_DASHBOARD_WIDGET_TYPES = new Set([
   'glossary',
   'injection_history',
   'active_protocols_notes',
-  'protocols_card',
+  // NOTE: protocols_card is NOT retired — it is a pinned Advanced-mode home card
+  // rendered outside WidgetFactory. Do not add it here or loadDashboardLayout will
+  // force-disable it and the Active Protocols card disappears.
 ]);
 
 /** Only these types appear in Manage Widgets (actual dashboard surface). */
@@ -434,7 +436,9 @@ export function getWidgetsForTrackingMode(mode) {
   if (mode === 'simple' || mode === 'single_focus' || mode === 'guided') {
     return SIMPLE_WIDGETS.map((w) => ({ ...w, settings: { ...(w.settings || {}) }, position: { ...(w.position || {}) } }));
   }
-  return DEFAULT_WIDGETS.map((w) => ({ ...w, settings: { ...(w.settings || {}) }, position: { ...(w.position || {}) } }));
+  return ensureProtocolsCardWidget(
+    DEFAULT_WIDGETS.map((w) => ({ ...w, settings: { ...(w.settings || {}) }, position: { ...(w.position || {}) } }))
+  );
 }
 
 export const WIDGET_METADATA = {
@@ -450,7 +454,7 @@ export const WIDGET_METADATA = {
   },
   [WIDGET_TYPES.UPCOMING_ORDER]: {
     title: 'Incoming Peptides',
-    description: 'Track your incoming orders and shipments',
+    description: 'Shows while you have an active order, then for 3 days after delivery',
     icon: 'Package',
     availableSizes: [WIDGET_SIZES.MEDIUM, WIDGET_SIZES.LARGE],
     settings: [
@@ -677,6 +681,30 @@ export const getSizeConfig = (size, screenWidth = null) => {
 // Storage utilities
 export const STORAGE_KEY = 'tpprover_dashboard_layout';
 
+/** Pinned Active Protocols card — Advanced home only; not in Manage Widgets. */
+export const PROTOCOLS_CARD_WIDGET = {
+  id: 'protocols_card',
+  type: 'protocols_card',
+  enabled: true,
+  size: WIDGET_SIZES.MEDIUM,
+  position: { x: 0, y: -1 },
+};
+
+/**
+ * Ensure the Active Protocols card exists and stays enabled.
+ * Hidden in Simple mode at render time; must not be force-disabled by layout load.
+ */
+export function ensureProtocolsCardWidget(widgets) {
+  const list = Array.isArray(widgets) ? [...widgets] : [];
+  const idx = list.findIndex((w) => w.id === 'protocols_card' || w.type === 'protocols_card');
+  if (idx === -1) {
+    list.unshift({ ...PROTOCOLS_CARD_WIDGET });
+  } else {
+    list[idx] = { ...list[idx], enabled: true, type: 'protocols_card', id: 'protocols_card' };
+  }
+  return list;
+}
+
 export const loadDashboardLayout = () => {
   try {
     // Check if we need to force a reset due to widget size updates
@@ -686,7 +714,7 @@ export const loadDashboardLayout = () => {
     if (layoutVersion !== currentVersion) {
       localStorage.setItem('tpprover_dashboard_version', currentVersion);
       localStorage.removeItem(STORAGE_KEY);
-      return DEFAULT_WIDGETS;
+      return ensureProtocolsCardWidget(DEFAULT_WIDGETS);
     }
     
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -766,12 +794,12 @@ export const loadDashboardLayout = () => {
         if (w) { w.enabled = true; }
       }
       
-      return compactGrid(filtered);
+      return ensureProtocolsCardWidget(compactGrid(filtered));
     }
   } catch (error) {
     console.warn('Failed to load dashboard layout:', error);
   }
-  return DEFAULT_WIDGETS;
+  return ensureProtocolsCardWidget(DEFAULT_WIDGETS);
 };
 
 export const saveDashboardLayout = (widgets, { userId } = {}) => {
@@ -823,13 +851,14 @@ export async function loadDashboardLayoutFromCloud(userId) {
           w.enabled = false;
         }
       }
+      const withProtocolsCard = ensureProtocolsCardWidget(filtered);
       // Mirror into localStorage so offline / subsequent loads stay in sync
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(withProtocolsCard));
       } catch {
         /* ignore */
       }
-      return compactGrid(filtered);
+      return compactGrid(withProtocolsCard);
     }
   } catch (error) {
     console.warn('Failed to load dashboard layout from cloud:', error);
@@ -1113,11 +1142,21 @@ export function switchModeDashboardLayout(fromMode, toMode) {
       nextWidgets = getWidgetsForTrackingMode(toMode);
     }
 
+    // Advanced mode always pins Active Protocols after Today's Research
+    const toNormalized = String(toMode).toLowerCase();
+    if (toNormalized === 'advanced' || toNormalized === 'multi_protocol') {
+      nextWidgets = ensureProtocolsCardWidget(nextWidgets);
+    }
+
     saveDashboardLayout(nextWidgets);
     return nextWidgets;
   } catch (err) {
     console.warn('switchModeDashboardLayout failed, falling back to defaults', err);
-    const fallback = getWidgetsForTrackingMode(toMode);
+    let fallback = getWidgetsForTrackingMode(toMode);
+    const toNormalized = String(toMode).toLowerCase();
+    if (toNormalized === 'advanced' || toNormalized === 'multi_protocol') {
+      fallback = ensureProtocolsCardWidget(fallback);
+    }
     saveDashboardLayout(fallback);
     return fallback;
   }

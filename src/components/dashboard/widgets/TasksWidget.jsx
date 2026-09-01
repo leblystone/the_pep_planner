@@ -488,7 +488,7 @@ const AsNeededSection = ({ protocols, theme, onLog }) => {
   return (
     <div className="mt-3">
       <div className="flex items-center gap-1.5 mb-2">
-        <BellSimpleRinging size={12} weight="duotone" style={{ color: theme.textLight }} />
+        <BellSimpleRinging size={16} weight="duotone" style={{ color: theme.textLight }} />
         <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.textLight }}>
           As Needed
         </span>
@@ -722,6 +722,7 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
           isOpen={showInjectionHistory}
           onClose={() => setShowInjectionHistory(false)}
           theme={theme}
+          initialView="map"
         />
       </div>
     );
@@ -797,6 +798,7 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
           isOpen={showInjectionHistory}
           onClose={() => setShowInjectionHistory(false)}
           theme={theme}
+          initialView="map"
         />
       </div>
     );
@@ -877,6 +879,7 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
           isOpen={showInjectionHistory}
           onClose={() => setShowInjectionHistory(false)}
           theme={theme}
+          initialView="map"
         />
       </div>
     </div>

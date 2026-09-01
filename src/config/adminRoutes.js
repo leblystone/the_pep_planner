@@ -9,14 +9,14 @@ export const ADMIN_BASE = '/admin';
 export const adminPrimaryTabs = [
   {
     id: 'overview',
-    label: 'Overview',
+    label: 'Dashboard',
     path: `${ADMIN_BASE}/overview/dashboard`,
     icon: 'LayoutDashboard',
     children: [
       { id: 'dashboard', label: 'Dashboard', path: `${ADMIN_BASE}/overview/dashboard` },
       { id: 'analytics', label: 'Analytics', path: `${ADMIN_BASE}/overview/analytics` },
       { id: 'revenue', label: 'Revenue', path: `${ADMIN_BASE}/overview/revenue` },
-      { id: 'sync-errors', label: '🔴 Sync Errors', path: `${ADMIN_BASE}/overview/sync-errors` },
+      { id: 'sync-errors', label: 'Sync Errors', path: `${ADMIN_BASE}/overview/sync-errors` },
       { id: 'contact', label: 'Contact', path: `${ADMIN_BASE}/overview/contact` },
     ],
   },
@@ -40,11 +40,8 @@ export const adminPrimaryTabs = [
     children: [
       { id: 'orders', label: 'Orders', path: `${ADMIN_BASE}/shop/orders`, icon: 'ShoppingCart' },
       { id: 'products', label: 'Products', path: `${ADMIN_BASE}/shop/products`, icon: 'Package' },
-      { id: 'reviews', label: 'Reviews', path: `${ADMIN_BASE}/shop/reviews`, icon: 'Star' },
       { id: 'marketing', label: 'Marketing', path: `${ADMIN_BASE}/shop/marketing`, icon: 'Megaphone' },
       { id: 'inquiries', label: 'Inquiries', path: `${ADMIN_BASE}/shop/inquiries`, icon: 'ChatCircle' },
-      { id: 'waitlist', label: 'Notify Waitlist', path: `${ADMIN_BASE}/shop/waitlist`, icon: 'Bell' },
-      { id: 'marketplaces', label: 'Marketplaces', path: `${ADMIN_BASE}/shop/marketplaces`, icon: 'Storefront' },
     ],
   },
   {
@@ -56,6 +53,15 @@ export const adminPrimaryTabs = [
       { id: 'announcements', label: 'Announcements', path: `${ADMIN_BASE}/comms/announcements` },
       { id: 'emails', label: 'Email', path: `${ADMIN_BASE}/comms/emails` },
       { id: 'notifications', label: 'Notifications', path: `${ADMIN_BASE}/comms/notifications` },
+    ],
+  },
+  {
+    id: 'discover',
+    label: 'Discover',
+    path: `${ADMIN_BASE}/discover`,
+    icon: 'Storefront',
+    children: [
+      { id: 'moderation', label: 'Moderation', path: `${ADMIN_BASE}/discover` },
     ],
   },
   {
@@ -118,6 +124,8 @@ export const adminPaths = {
   commsNotificationTracker: `${ADMIN_BASE}/comms/notifications`,
   commsNotifications: `${ADMIN_BASE}/comms/notifications`,
   commsAnnouncements: `${ADMIN_BASE}/comms/announcements`,
+  // Discover
+  discover: `${ADMIN_BASE}/discover`,
   // Legacy comms paths
   commsPush: `${ADMIN_BASE}/comms/notifications`,
   commsInApp: `${ADMIN_BASE}/comms/announcements`,
