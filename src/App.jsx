@@ -701,6 +701,9 @@ function App() {
           if (hasSelectedMode) {
             setLocalTrackingMode(mode, { source: 'hydrate' });
             setOnboardingTrackingMode(mode);
+          } else {
+            // Reset to null for users who haven't selected yet, so the chooser doesn't pre-select
+            setOnboardingTrackingMode(null);
           }
 
           if (hasOnboarded || resumeStep === ONBOARDING_STEPS.DONE) {

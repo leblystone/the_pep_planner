@@ -60,7 +60,7 @@ export default function OnboardingFlow({ open, theme, userId, initialStep, initi
   const [step, setStep] = useState(initialStep || ONBOARDING_STEPS.SPLASH);
   const [direction, setDirection] = useState(1);
   const [trackingMode, setTrackingMode] = useState(
-    normalizeTrackingMode(initialTrackingMode || TRACKING_MODES.SIMPLE)
+    initialTrackingMode ? normalizeTrackingMode(initialTrackingMode) : null
   );
   /** Keeps first-protocol answers when user backs from setup checklist */
   const [protocolDraft, setProtocolDraft] = useState(null);
