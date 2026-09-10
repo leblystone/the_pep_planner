@@ -83,6 +83,8 @@ export default function LogOneOffDoseModal({
   const [showSitePicker, setShowSitePicker] = useState(false);
   // Protocol that already exists for the logged peptide
   const [existingProtocol, setExistingProtocol] = useState(null);
+  // BUG FIX #14: Prevent double-save from React Strict Mode or double-click
+  const saveInProgressRef = React.useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -93,6 +95,8 @@ export default function LogOneOffDoseModal({
     setShowNameSuggestions(false);
     setShowSitePicker(false);
     setExistingProtocol(null);
+    // BUG FIX #14: Reset save guard when modal opens
+    saveInProgressRef.current = false;
   }, [open, defaultDateKey, prefilledProtocol]);
 
   const nameSuggestions = useMemo(() => {
@@ -124,6 +128,12 @@ export default function LogOneOffDoseModal({
   };
 
   const handleSave = async () => {
+    // BUG FIX #14: Prevent double-save (React Strict Mode, double-click, etc.)
+    if (saveInProgressRef.current) {
+      console.warn('⚠️ Save already in progress, ignoring duplicate call');
+      return;
+    }
+
     const name = (form.peptideName || '').trim();
     if (!name) {
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Enter a peptide name', type: 'error' } }));
@@ -134,6 +144,7 @@ export default function LogOneOffDoseModal({
       return;
     }
 
+    saveInProgressRef.current = true;
     setIsSaving(true);
     try {
       const entry = prepareItemForSave(
@@ -153,7 +164,11 @@ export default function LogOneOffDoseModal({
         { isNew: true }
       );
 
-      setOneOffDoses((prev) => [entry, ...(Array.isArray(prev) ? prev : oneOffDoses || [])].slice(0, 2000));
+      // BUG FIX #14: Only use prev parameter to prevent stale closure issues
+      setOneOffDoses((prev) => {
+        const currentList = Array.isArray(prev) ? prev : [];
+        return [entry, ...currentList].slice(0, 2000);
+      });
 
       if (
         isInjectionSiteTrackingEnabled() &&
@@ -183,25 +198,22 @@ export default function LogOneOffDoseModal({
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'One-off dose logged', type: 'success' } }));
       setSavedDose(entry);
 
-      // If pre-filled from an existing protocol, skip promote entirely
-      if (prefilledProtocol) {
-        handleClose();
-        return;
-      }
+      // BUG FIX #13: Close modal immediately after success to prevent stuck state
+      // Auto-promote to protocol in background if appropriate (optional future enhancement)
+      handleClose();
 
-      // Check if an as-needed protocol already exists for this peptide
-      const existing = findExistingAsNeededProtocol(protocols, name);
-      if (existing) {
-        setExistingProtocol(existing);
-        setStep('existing');
-      } else {
-        setStep('promote');
-      }
+      // Optional: Check if an as-needed protocol already exists for this peptide
+      // (Could show a non-blocking toast suggesting to create a protocol instead)
+      // const existing = findExistingAsNeededProtocol(protocols, name);
+      // if (!prefilledProtocol && !existing) {
+      //   // Future: Could show a subtle toast: "Want to save as protocol for next time?"
+      // }
     } catch (error) {
       console.error('Failed to log one-off dose:', error);
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: 'Failed to log dose', type: 'error' } }));
     } finally {
       setIsSaving(false);
+      saveInProgressRef.current = false;
     }
   };
 
