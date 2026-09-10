@@ -1312,7 +1312,7 @@ export default function Recon() {
                                                         </span>
                                                         <Calendar size={11} style={{ color: theme.textLight, opacity: 0.7 }} />
                                                         <span className="text-[10px] font-semibold opacity-75 uppercase tracking-wide" style={{ color: theme.text }}>
-                                                            {item.date || item.createdAt ? formatMMDDYYYY(item.date || item.createdAt) : 'No Date'}
+                                                            {item.dateAcquired ? formatMMDDYYYY(item.dateAcquired) : (item.date || item.createdAt ? formatMMDDYYYY(item.date || item.createdAt) : 'No Date')}
                                                         </span>
                                                     </div>
                                                     {linkedProtocol && (
@@ -1769,7 +1769,7 @@ export default function Recon() {
 			</div>
 			</div>
 
-            <BottomSheet open={showEditModal} onClose={() => { setShowEditModal(null); setEditingItem(null); setDraft({}); clearSavedData(); setConfirmDelete(false); }} title={editingItem?.id && !editingItem.id.startsWith('draft_') ? `Edit ${(editingItem.name || editingItem.peptide || '').replace(/\s*\((separate|blended)\)\s*$/i, '').trim() || ''} Vial`.trim() : 'New Reconstitution'} theme={theme} maxHeight="90vh" titleExtra={<AutoSaveIndicator isSaving={isSaving} lastSaved={lastSaved} theme={theme} compact iconOnly={true} />} footer={
+            <BottomSheet open={showEditModal} onClose={() => { setShowEditModal(null); setEditingItem(null); setDraft({}); clearSavedData(); setConfirmDelete(false); }} title={editingItem?.id && !editingItem.id.startsWith('draft_') ? `Edit ${(editingItem.name || editingItem.peptide || '').replace(/\s*\((separate|blended)\)\s*$/i, '').trim() || ''} Vial`.trim() : 'New Reconstitution'} theme={theme} maxHeight="85vh" titleExtra={<AutoSaveIndicator isSaving={isSaving} lastSaved={lastSaved} theme={theme} compact iconOnly={true} />} footer={
 			<div className="w-full flex items-center justify-between gap-3">
 			{editingItem?.id && !editingItem.id.startsWith('draft_') ? (
 				<div className="flex items-center">

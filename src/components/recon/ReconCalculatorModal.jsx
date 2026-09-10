@@ -109,8 +109,9 @@ export default function ReconCalculatorModal({ open, onClose, theme, prefill }) 
       };
       
       // Remove any draft versions of this item when saving as complete
+      // Keep all existing vials - multiple vials per peptide name are allowed (distinct lot/date)
       setReconItems(prev => {
-        const filtered = prev.filter(item => !item.isDraft || item.peptide !== newItem.peptide);
+        const filtered = prev.filter(item => !item.isDraft);
         return [newItem, ...filtered];
       });
 

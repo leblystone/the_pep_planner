@@ -299,8 +299,8 @@ const ModernToastContainer = ({ theme, desktopSidebarHalf = '3rem' }) => {
 
   return (
     <div
-      className={`fixed z-[10050] flex items-center gap-2 pointer-events-none max-w-sm w-full ${
-        isDesktop ? 'flex-col' : 'flex-col-reverse'
+      className={`fixed z-[10050] flex items-center pointer-events-none max-w-sm w-full ${
+        isDesktop ? 'flex-col gap-2' : 'flex-col-reverse gap-3'
       }`}
       style={
         isDesktop
