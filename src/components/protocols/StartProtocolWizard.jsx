@@ -788,8 +788,8 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
 
     // Delivery Method is mutually exclusive with recon for linked vials:
     // - After recon: linked peptides already have delivery from the calculator
-    // - After skip recon: ask delivery here
-    // - Manual (skipped-link) peptides always need this section
+    // - After skip recon (reconSkipped): linked vials need delivery here
+    // - BUG #6 FIX: Manual (skipped-link) peptides don't need delivery - they're tracked manually
     const peptidesNeedingDelivery = useMemo(() => {
         if (!protocol?.peptides?.length) return [];
         return protocol.peptides
@@ -798,7 +798,8 @@ export default function StartProtocolWizard({ open, onClose, protocol, stockpile
                 return { peptide: p, peptideId, status: linkedData[peptideId]?.status };
             })
             .filter(({ status }) => {
-                if (status === 'skipped') return true;
+                // BUG #6 FIX: Skipped-link peptides (manual tracking) don't require delivery method
+                if (status === 'skipped') return false;
                 if (status === 'linked') {
                     if (reconComplete) return false;
                     return reconSkipped;

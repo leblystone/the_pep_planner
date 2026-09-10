@@ -243,9 +243,10 @@ export default function BottomSheet({
         style={{ 
           backgroundColor: theme?.isDark ? 'rgba(24, 28, 36, 0.98)' : (theme?.cardBackground || '#FFFFFF'),
           // fitContent: size to content (fit-content avoids flex+maxHeight stretching to full vh)
+          // BUG #10 FIX: Use dvh (dynamic viewport height) on mobile to account for keyboard
           ...(fitContent
-            ? { height: 'auto', maxHeight }
-            : { height: maxHeight, maxHeight }),
+            ? { height: 'auto', maxHeight: isMobile ? '90dvh' : maxHeight }
+            : { height: isMobile ? '90dvh' : maxHeight, maxHeight: isMobile ? '90dvh' : maxHeight }),
           boxShadow: theme?.isDark 
             ? '0 -10px 40px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.08)' 
             : '0 -10px 40px rgba(0,0,0,0.2)',
@@ -416,7 +417,12 @@ export default function BottomSheet({
           style={{ 
             backgroundColor: theme?.isDark ? 'rgba(24, 28, 36, 0.98)' : (theme?.cardBackground || '#FFFFFF'),
             // Reserve header + footer so the fixed footer never gets clipped under maxHeight
-            ...(fitContent ? { maxHeight: `calc(${maxHeight} - 9rem)` } : {}),
+            // BUG #10 FIX: Use dvh for mobile to account for keyboard, with vh fallback
+            ...(fitContent ? { 
+              maxHeight: isMobile 
+                ? `min(calc(90dvh - 9rem), calc(${maxHeight} - 9rem))` 
+                : `calc(${maxHeight} - 9rem)` 
+            } : {}),
             ...(seamlessContent ? { 
               boxShadow: 'none', 
               border: 'none',

@@ -955,7 +955,31 @@ export default function Protocols() {
       }));
     }
     
-    const activeHistoryEntry = findActiveProtocolHistoryEntry(protocolToEnd.id);
+    let activeHistoryEntry = findActiveProtocolHistoryEntry(protocolToEnd.id);
+    
+    // BUG #5 FIX: If no active history entry exists, create one before ending
+    if (!activeHistoryEntry) {
+      const historyEntryId = saveProtocolHistoryEntry({
+        protocolId: protocolToEnd.id,
+        protocolName: protocolToEnd.protocolName || protocolToEnd.name || 'Unnamed Protocol',
+        startDate: protocolToEnd.startDate || today,
+        protocolData: {
+          protocolName: protocolToEnd.protocolName || protocolToEnd.name,
+          peptides: protocolToEnd.peptides || [],
+          linkedItems: protocolToEnd.linkedItems || {}
+        },
+        vials: [],
+        reconstitutionData: null,
+        skippedReconstitution: null
+      });
+      
+      if (historyEntryId) {
+        // Find the newly created entry
+        const allHistory = getProtocolHistory();
+        activeHistoryEntry = allHistory.find(e => e.id === historyEntryId);
+      }
+    }
+    
     if (activeHistoryEntry) {
       const expectedEndDate = updatedProtocol.endDate || updatedProtocol.expectedEndDate;
       let completionStatus = isReschedule
