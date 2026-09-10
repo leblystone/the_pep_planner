@@ -462,6 +462,8 @@ export default function AddSupplyModal({ open, onClose, theme, onSave, editSuppl
                 </p>
                 <input
                   type="text"
+                  name="supply-custom-name"
+                  autoComplete="off"
                   value={customName}
                   onChange={e => setCustomName(e.target.value)}
                   placeholder="e.g., Mixing Vial, IV Catheter..."
@@ -487,6 +489,8 @@ export default function AddSupplyModal({ open, onClose, theme, onSave, editSuppl
               </p>
               <input
                 type="text"
+                name="supply-brand"
+                autoComplete="off"
                 value={brand}
                 onChange={e => setBrand(e.target.value)}
                 placeholder="e.g., BD, Norm-Ject, Millex..."
@@ -537,6 +541,8 @@ export default function AddSupplyModal({ open, onClose, theme, onSave, editSuppl
             </p>
             <input
               type="text"
+              name="supply-name"
+              autoComplete="off"
               value={nameOverride !== '' ? nameOverride : getAutoName()}
               onChange={e => setNameOverride(e.target.value)}
               placeholder="Name..."
@@ -573,6 +579,8 @@ export default function AddSupplyModal({ open, onClose, theme, onSave, editSuppl
               </button>
               <input
                 type="number"
+                name="supply-quantity"
+                autoComplete="off"
                 value={quantity}
                 onChange={e => setQuantity(e.target.value)}
                 min="0"
@@ -616,6 +624,8 @@ export default function AddSupplyModal({ open, onClose, theme, onSave, editSuppl
             <div className="flex items-center gap-3">
               <input
                 type="number"
+                name="supply-threshold"
+                autoComplete="off"
                 value={lowThreshold}
                 onChange={e => setLowThreshold(e.target.value)}
                 min="0"
@@ -810,6 +820,8 @@ export default function AddSupplyModal({ open, onClose, theme, onSave, editSuppl
               <span className="normal-case font-normal opacity-60">(optional)</span>
             </p>
             <textarea
+              name="supply-notes"
+              autoComplete="off"
               value={notes}
               onChange={e => setNotes(e.target.value)}
               placeholder="Storage notes, reorder link, preferred brand..."

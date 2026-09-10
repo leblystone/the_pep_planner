@@ -431,6 +431,7 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
               customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'}
               outlined={true}
               customTextColor={theme.isDark ? null : "#181A18"}
+              autoComplete="off"
               prefix={(
                 <div ref={purposeIconAnchorRef}>
                   <button
@@ -485,6 +486,8 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                 <input 
                   type="text"
                   id="amount-input"
+                  name="stockpile-amount"
+                  autoComplete="off"
                   value={form.mg || ''} 
                   onChange={e => updateFormData({ mg: e.target.value })} 
                   onFocus={() => setIsAmountFocused(true)}
@@ -509,7 +512,11 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                 />
                 <button
                   type="button"
-                  onClick={() => setIsAmountUnitDropdownOpen(prev => !prev)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsAmountUnitDropdownOpen(prev => !prev);
+                  }}
                   onMouseDown={(e) => e.preventDefault()}
                   onTouchStart={(e) => e.preventDefault()}
                   className="flex items-center justify-between gap-1 px-2 py-2 flex-shrink-0 rounded-r-lg relative cursor-pointer transition-all border-none outline-none"
@@ -619,6 +626,8 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                 <input 
                   type="text"
                   id="quantity-input"
+                  name="stockpile-quantity"
+                  autoComplete="off"
                   value={form.quantity || ''} 
                   onChange={e => updateFormData({ quantity: e.target.value })} 
                   onFocus={() => setIsQuantityFocused(true)}
@@ -641,7 +650,11 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                 />
                 <button
                   type="button"
-                  onClick={() => setIsUnitDropdownOpen(prev => !prev)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsUnitDropdownOpen(prev => !prev);
+                  }}
                   onMouseDown={(e) => e.preventDefault()}
                   onTouchStart={(e) => e.preventDefault()}
                   className="flex items-center justify-between gap-1 px-2 py-2 flex-shrink-0 rounded-r-lg relative cursor-pointer transition-all border-none outline-none"
@@ -769,7 +782,7 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
             </div>
           </div>
           
-          <VendorSuggestInput label="Vendor" value={form.vendor} onChange={v => updateFormData({ vendor: v })} placeholder="e.g., Pharm..." theme={theme} />
+          <VendorSuggestInput label="Vendor" value={form.vendor} onChange={v => updateFormData({ vendor: v })} placeholder="e.g., Pharm..." theme={theme} autoComplete="off" />
           
           {/* Cost per - under Order Details */}
           <div className="relative" data-dropdown-container>
@@ -784,6 +797,8 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
               <input 
                 type="text"
                 id="price-input"
+                name="stockpile-cost"
+                autoComplete="off"
                 value={form.cost || ''} 
                 onChange={e => updateFormData({ cost: e.target.value })} 
                 onFocus={() => setIsPriceFocused(true)}
@@ -808,7 +823,11 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
               />
               <button
                 type="button"
-                onClick={() => setIsPriceUnitDropdownOpen(prev => !prev)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsPriceUnitDropdownOpen(prev => !prev);
+                }}
                 onMouseDown={(e) => e.preventDefault()}
                 onTouchStart={(e) => e.preventDefault()}
                 className="flex items-center justify-between gap-2 px-3 py-3 flex-shrink-0 rounded-r-lg relative cursor-pointer transition-all border-none outline-none"
@@ -973,7 +992,8 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                     theme={theme} 
                     outlined={true} 
                     customTextColor={theme.isDark ? null : "#181A18"} 
-                    customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'} 
+                    customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'}
+                    autoComplete="off"
                   />
                   <TextInput 
                     label="Batch #" 
@@ -984,7 +1004,8 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                     uppercase={true} 
                     outlined={true} 
                     customTextColor={theme.isDark ? null : "#181A18"} 
-                    customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'} 
+                    customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'}
+                    autoComplete="off"
                   />
                 </div>
                 

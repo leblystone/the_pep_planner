@@ -33,6 +33,8 @@ export default function CrimpCapColorInput({ value, onChange, theme, customShado
         <input
           className="flex-1 min-w-0 border-0 outline-none text-sm font-medium py-3 px-3 bg-transparent"
           style={{ color: inputColor }}
+          name="crimp-color"
+          autoComplete="off"
           value={crimpPart}
           onChange={e => onChange([e.target.value.trim(), capPart].filter(Boolean).join(' / '))}
           onFocus={() => setIsFocused(true)}
@@ -44,6 +46,8 @@ export default function CrimpCapColorInput({ value, onChange, theme, customShado
         <input
           className="flex-1 min-w-0 border-0 outline-none text-sm font-medium py-3 px-3 bg-transparent"
           style={{ color: inputColor }}
+          name="cap-color"
+          autoComplete="off"
           value={capPart}
           onChange={e => onChange([crimpPart, e.target.value.trim()].filter(Boolean).join(' / '))}
           onFocus={() => setIsFocused(true)}

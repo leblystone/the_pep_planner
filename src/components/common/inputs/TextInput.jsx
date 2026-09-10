@@ -27,6 +27,7 @@ export default function TextInput({
   minimalOutline = false,
   step = null,
   autoFocus = false,
+  autoComplete = null,
 }) {
   const [isFocused, setIsFocused] = useState(false);
   // Ensure value is always a string to prevent controlled/uncontrolled warnings
@@ -135,6 +136,7 @@ export default function TextInput({
               value={safeValue}
               rows={rows}
               autoFocus={autoFocus}
+              autoComplete={autoComplete || undefined}
               onChange={e => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)}
               onFocus={(e) => {
                 setIsFocused(true);
@@ -169,6 +171,7 @@ export default function TextInput({
               value={safeValue}
               step={step || undefined}
               autoFocus={autoFocus}
+              autoComplete={autoComplete || undefined}
               onChange={e => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)}
               onFocus={(e) => {
                 setIsFocused(true);
@@ -235,6 +238,7 @@ export default function TextInput({
             name={name}
             value={safeValue}
             rows={rows}
+            autoComplete={autoComplete || undefined}
             onChange={e => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)}
             onFocus={onFocus}
             onBlur={onBlur}
@@ -258,6 +262,7 @@ export default function TextInput({
             name={name}
             type={type}
             value={safeValue}
+            autoComplete={autoComplete || undefined}
             onChange={e => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)}
             onFocus={onFocus}
             onBlur={onBlur}

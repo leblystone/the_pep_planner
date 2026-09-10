@@ -2,7 +2,7 @@ import React from 'react'
 import TextInput from '../common/inputs/TextInput'
 import { useAppContext } from '../../context/AppContext'
 
-export default function VendorSuggestInput({ label = 'Vendor', value, onChange, placeholder = 'Vendor', theme, maxLength = null }) {
+export default function VendorSuggestInput({ label = 'Vendor', value, onChange, placeholder = 'Vendor', theme, maxLength = null, autoComplete = null }) {
   const { vendors: contextVendors } = useAppContext()
   const vendors = contextVendors || []
   const [q, setQ] = React.useState(value || '')
@@ -38,7 +38,8 @@ export default function VendorSuggestInput({ label = 'Vendor', value, onChange, 
         outlined={true} 
         customTextColor={theme.isDark ? null : "#181A18"} 
         customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'} 
-        maxLength={maxLength} 
+        maxLength={maxLength}
+        autoComplete={autoComplete}
       />
       {open && list.length > 0 && (
         <div 
