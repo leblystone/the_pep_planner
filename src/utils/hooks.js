@@ -6,7 +6,11 @@ const GOALS_KEY_LEGACY = 'tpprover_goals';
 function readGoals() {
   try {
     const raw = localStorage.getItem(GOALS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      return [];
+    }
     const legacy = localStorage.getItem(GOALS_KEY_LEGACY);
     if (legacy) {
       const parsed = JSON.parse(legacy);
@@ -17,7 +21,8 @@ function readGoals() {
       }
     }
     return [];
-  } catch {
+  } catch (error) {
+    console.error('Error reading goals from localStorage:', error);
     return [];
   }
 }
@@ -27,19 +32,25 @@ function readGoals() {
  * Use this instead of useLocalStorage('tpprover_goals') so goals sync across devices.
  */
 export function useSyncedGoals() {
-  const [goals, setGoals] = React.useState(readGoals);
+  const [goals, setGoals] = React.useState(() => {
+    const initial = readGoals();
+    return Array.isArray(initial) ? initial : [];
+  });
   const instanceIdRef = React.useRef(`goals-hook-${Date.now()}-${Math.random()}`);
   const lastSerializedRef = React.useRef(JSON.stringify(goals));
 
   React.useEffect(() => {
     try {
-      const serialized = JSON.stringify(goals);
+      const safeGoals = Array.isArray(goals) ? goals : [];
+      const serialized = JSON.stringify(safeGoals);
       lastSerializedRef.current = serialized;
       localStorage.setItem(GOALS_KEY, serialized);
       window.dispatchEvent(new CustomEvent('tpp:user-goals-updated', {
-        detail: { goals, source: 'useSyncedGoals', instanceId: instanceIdRef.current }
+        detail: { goals: safeGoals, source: 'useSyncedGoals', instanceId: instanceIdRef.current }
       }));
-    } catch {}
+    } catch (error) {
+      console.error('Error saving goals to localStorage:', error);
+    }
   }, [goals]);
 
   React.useEffect(() => {
