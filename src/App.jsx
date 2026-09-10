@@ -689,7 +689,16 @@ function App() {
           const resumeStep = userState?.onboardingStep || ONBOARDING_STEPS.SPLASH;
           const mode = normalizeTrackingMode(userState?.trackingMode);
 
-          if (userState?.trackingMode) {
+          // Only restore trackingMode for users who have already selected it during onboarding
+          // (i.e., they've progressed past RESEARCHER_TYPE step). This prevents pre-selecting
+          // a mode for brand new users who haven't seen the chooser yet.
+          const hasSelectedMode = userState?.trackingMode && (
+            !resumeStep || 
+            resumeStep === ONBOARDING_STEPS.DONE ||
+            [ONBOARDING_STEPS.FIRST_PROTOCOL, ONBOARDING_STEPS.SETUP_CHECKLIST, ONBOARDING_STEPS.TRIAL_PRICING].includes(resumeStep)
+          );
+          
+          if (hasSelectedMode) {
             setLocalTrackingMode(mode, { source: 'hydrate' });
             setOnboardingTrackingMode(mode);
           }
@@ -727,9 +736,15 @@ function App() {
           sessionStorage.removeItem('tpp_welcome_shown');
 
           if (!hasOnboarded && isFirebaseUser && !sampleDataCleared) {
-            console.log('✅ New user detected - showing onboarding flow', { resumeStep, accountAgeMs: Math.round(accountAgeMs / 1000) + 's' });
+            console.log('✅ New user detected - showing onboarding flow', { resumeStep, accountAgeMs: Math.round(accountAgeMs / 1000) + 's', isNewAccount });
+            
+            // CRITICAL: For truly new accounts (< 15 min old), ALWAYS start from SPLASH
+            // to ensure they see the Simple vs Advanced chooser. Only resume from a saved
+            // step if the account is older (returning from another device/session).
+            const shouldResumeFromSavedStep = !isNewAccount && resumeStep && resumeStep !== ONBOARDING_STEPS.DONE && resumeStep !== ONBOARDING_STEPS.SPLASH;
+            
             setOnboardingResumeStep(
-              resumeStep && resumeStep !== ONBOARDING_STEPS.DONE
+              shouldResumeFromSavedStep
                 ? resumeStep
                 : ONBOARDING_STEPS.SPLASH
             );
