@@ -6,6 +6,7 @@ import { useAppContext } from '../../context/AppContext'
 import { useSubscriptionAccess } from '../../utils/useSubscriptionAccess'
 import { appendStockEvent } from '../../utils/stockHistory'
 import { prepareItemForSave } from '../../utils/userDataSave'
+import { generateId } from '../../utils/string'
 import useAutoSave from '../../utils/useAutoSave'
 import AutoSaveIndicator from '../common/AutoSaveIndicator'
 import { FilePlus, Info, Share2, Bookmark } from 'lucide-react'
@@ -91,7 +92,7 @@ export default function ReconCalculatorModal({ open, onClose, theme, prefill }) 
       }, 0);
 
       const newItem = {
-        id: Date.now(),
+        id: generateId(),
         peptide: peptideNames,
         mg: totalMg,
         dose: totalDose, // This is now total mcg for calculation purposes
@@ -109,9 +110,8 @@ export default function ReconCalculatorModal({ open, onClose, theme, prefill }) 
       };
       
       // Remove any draft versions of this item when saving as complete
-      // Keep all existing vials - multiple vials per peptide name are allowed (distinct lot/date)
       setReconItems(prev => {
-        const filtered = prev.filter(item => !item.isDraft);
+        const filtered = prev.filter(item => !item.isDraft || item.peptide !== newItem.peptide);
         return [newItem, ...filtered];
       });
 
@@ -180,7 +180,7 @@ export default function ReconCalculatorModal({ open, onClose, theme, prefill }) 
       }, 0) || 0;
 
       const draftItem = {
-        id: `draft_${Date.now()}`,
+        id: `draft_${generateId()}`,
         peptide: peptideNames,
         mg: totalMg,
         dose: totalDose,
