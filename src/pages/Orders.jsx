@@ -888,7 +888,7 @@ export default function Orders() {
 	}, [filteredOrders]);
 	return (
 		<IconContext.Provider value={{ weight: 'duotone' }}>
-		<section className="page-bg px-2 sm:px-4 md:px-6 lg:px-8">
+		<section className="page-bg px-2 sm:px-4 md:px-6 lg:px-8 pb-20 lg:pb-6">
 
 			{/* ── Wishlist tab ── */}
 			{pageTab === 'wishlist' && (
