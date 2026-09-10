@@ -2893,11 +2893,53 @@ exports.onUserCreated = onDocumentCreated(
         
         logger.info(`✅ Pre-granted lifetime access applied successfully to: ${userId}`);
       }
+    } else {
+      // ═══════════════════════════════════════════════════════════════════════
+      // NEW USER TRIAL INITIALIZATION (CRITICAL FIX)
+      // ═══════════════════════════════════════════════════════════════════════
+      // No pre-granted lifetime access → initialize 14-day Research+ trial.
+      // This is the source of truth for new-user trial entitlement. Without it,
+      // new signups fall through to Free plan immediately, which violates the
+      // product requirement: "New signup = 14-day Research+ trial then Free."
+      
+      logger.info(`🎁 Initializing 14-day Research+ trial for new user: ${userId}`);
+      
+      const now = new Date();
+      const TRIAL_DAYS = 14; // 14-day trial for all new signups after 2026-03-10
+      const trialEnd = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+      
+      const trialSubscription = {
+        status: 'trialing',
+        interval: 'trial',
+        plan: '14-Day Research Trial',
+        tier: 'research_plus', // Give full Research+ features during trial
+        startedAt: now.toISOString(),
+        currentPeriodStart: now.toISOString(),
+        currentPeriodEnd: trialEnd.toISOString(),
+        userId: userId,
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        trialStartedAt: now.toISOString(),
+        trialDays: TRIAL_DAYS,
+      };
+      
+      // Write to users collection (embedded subscription)
+      await db.collection('users').doc(userId).set({
+        subscription: trialSubscription,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      
+      // Write to userSubscriptions collection (canonical subscription source)
+      await db.collection('userSubscriptions').doc(userId).set({
+        subscription: trialSubscription,
+      }, { merge: true });
+      
+      logger.info(`✅ 14-day Research+ trial initialized for ${userId} (expires: ${trialEnd.toISOString()})`);
     }
     
     // Send welcome email
     logger.info(`📧 Attempting to send welcome email to: ${userEmail}`);
     logger.info(`📧 User ID: ${userId}, User Name: ${userName || 'null'}`);
+
     
     const welcomeEmailSent = await emailService.sendWelcomeEmail(userEmail, userName, {
       userId: userId,
