@@ -80,7 +80,7 @@ export default function TrialPricingStep({ theme, onComplete, onBack }) {
         type="button"
         onClick={() => handleSelectPlan(planKey)}
         disabled={anyLoading}
-        className="relative mt-2.5 w-full py-2 rounded-lg text-center text-xs font-bold text-white transition-opacity disabled:opacity-60"
+        className="relative mt-2.5 w-full py-2.5 rounded-lg text-center text-sm font-semibold text-white transition-opacity disabled:opacity-60"
         style={{ backgroundColor }}
       >
         {loading && (
@@ -246,12 +246,7 @@ export default function TrialPricingStep({ theme, onComplete, onBack }) {
                 }}
               >
                 <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${primary} 0%, ${primaryDark} 100%)` }}
-                  >
-                    <CalendarDots size={28} className="text-white" weight="duotone" />
-                  </div>
+                  <CalendarDots size={40} className="flex-shrink-0" weight="duotone" style={{ color: primary }} />
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-sm" style={{ color: text }}>Monthly</div>
                     <div className="text-[11px] leading-snug" style={{ color: muted }}>
@@ -290,12 +285,7 @@ export default function TrialPricingStep({ theme, onComplete, onBack }) {
                   </span>
                 </div>
                 <div className="flex items-center gap-3 pt-0.5">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${primary} 0%, ${primaryDark} 100%)` }}
-                  >
-                    <CalendarStar size={28} className="text-white" weight="duotone" />
-                  </div>
+                  <CalendarStar size={40} className="flex-shrink-0" weight="duotone" style={{ color: primary }} />
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-sm" style={{ color: text }}>Annual</div>
                     <div className="text-[11px] leading-snug" style={{ color: muted }}>
@@ -340,12 +330,7 @@ export default function TrialPricingStep({ theme, onComplete, onBack }) {
                 }}
               >
                 <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${primary} 0%, ${primaryDark} 100%)` }}
-                  >
-                    <InfinityIcon size={28} className="text-white" weight="duotone" />
-                  </div>
+                  <InfinityIcon size={40} className="flex-shrink-0" weight="duotone" style={{ color: primary }} />
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-sm" style={{ color: text }}>Lifetime</div>
                     <div className="text-[11px] leading-snug" style={{ color: muted }}>

@@ -728,25 +728,24 @@ function App() {
             return;
           }
 
-          // Hard gate: existing accounts must never see onboarding, even if hasOnboarded
-          // wasn't written to their cloud state. Use Firebase account creation time as the
-          // source of truth — if the account is older than 15 minutes it cannot be "new".
+          // ─── Old-user grandfather gate ───────────────────────────────────────
+          // The ONLY users we skip here are genuinely old accounts (> 7 days) that
+          // have evidence they already used the app (trackingMode saved in cloud).
+          // This covers users who existed before onboarding was introduced.
+          //
+          // We do NOT use a short age window (e.g. 15 min) because new users who
+          // confirm email and log back in minutes/hours later would be incorrectly
+          // flagged as "existing" and silently skipped.
           const creationTime = user?.metadata?.creationTime
             ? new Date(user.metadata.creationTime).getTime()
             : null;
-          const accountAgeMs = creationTime ? Date.now() - creationTime : Infinity;
-          const isNewAccount = accountAgeMs < 15 * 60 * 1000; // < 15 minutes old
+          const accountAgeMs = creationTime ? Date.now() - creationTime : 0;
+          const isEstablishedOldUser =
+            accountAgeMs > 7 * 24 * 60 * 60 * 1000 && // older than 7 days
+            hasExplicitModeChoice;                       // AND already has a mode saved
 
-          // Allow resuming a partially-completed flow (user already passed SPLASH) even
-          // if the account is older — they started on a different device/session.
-          const isResumingInProgress =
-            resumeStep &&
-            resumeStep !== ONBOARDING_STEPS.SPLASH &&
-            resumeStep !== ONBOARDING_STEPS.DONE;
-
-          if (!isNewAccount && !isResumingInProgress) {
-            // Existing account with no in-progress flow — mark as onboarded silently
-            // so this check never fires again for them.
+          if (isEstablishedOldUser) {
+            // Pre-onboarding existing user — grandfather them in silently.
             try {
               const { saveUserState } = await import('./services/cloudStorage');
               await saveUserState(user.uid, { hasOnboarded: true });
@@ -754,29 +753,38 @@ function App() {
             return;
           }
 
+          // ─── Everyone else who hasn't onboarded: show the flow ───────────────
+          // This covers:
+          //   • Brand new signups (just signed up, < 15 min old)
+          //   • Users who confirmed email and logged back in (any age < 7 days)
+          //   • Users mid-flow resuming from another device
           sessionStorage.removeItem('tpp_welcome_shown');
 
-          // Do NOT gate on sampleDataCleared — clearing demo data is unrelated to first-run
-          // onboarding and previously caused new/returning-incomplete users to skip the chooser.
-          if (!hasOnboarded && isFirebaseUser) {
-            console.log('✅ New user detected - showing onboarding flow', { resumeStep, accountAgeMs: Math.round(accountAgeMs / 1000) + 's', isNewAccount, hasExplicitModeChoice });
-
-            // New accounts always start at SPLASH.
-            // Older accounts may resume mid-flow, but NEVER past the chooser without an
-            // explicit mode pick (clamp to RESEARCHER_TYPE instead).
-            let startStep = ONBOARDING_STEPS.SPLASH;
-            if (
-              !isNewAccount &&
+          if (isFirebaseUser) {
+            // Determine start step:
+            //   - If resuming a mid-flow step (past SPLASH, not DONE) → resume it,
+            //     but clamp to RESEARCHER_TYPE if they passed chooser without a real pick.
+            //   - Otherwise always start at SPLASH.
+            const isResumingInProgress =
               resumeStep &&
-              resumeStep !== ONBOARDING_STEPS.DONE &&
-              resumeStep !== ONBOARDING_STEPS.SPLASH
-            ) {
+              resumeStep !== ONBOARDING_STEPS.SPLASH &&
+              resumeStep !== ONBOARDING_STEPS.DONE;
+
+            let startStep = ONBOARDING_STEPS.SPLASH;
+            if (isResumingInProgress) {
               if (pastChooserSteps.includes(resumeStep) && !hasExplicitModeChoice) {
                 startStep = ONBOARDING_STEPS.RESEARCHER_TYPE;
               } else {
                 startStep = resumeStep;
               }
             }
+
+            console.log('✅ Showing onboarding', {
+              startStep,
+              accountAgeDays: creationTime ? +(accountAgeMs / 86400000).toFixed(1) : 'unknown',
+              hasExplicitModeChoice,
+              isResumingInProgress,
+            });
 
             setOnboardingResumeStep(startStep);
             setShowOnboarding(true);
@@ -859,14 +867,23 @@ function App() {
   }, [user?.uid, showOnboarding]);
 
   // Re-consent: show modal when user has not accepted current ToS/Privacy versions (uses Firebase for cross-device)
+  // Suppressed while onboarding is open (user just agreed during signup) and for
+  // accounts younger than 24 hours (agreement was just recorded moments ago — even
+  // if localStorage was cleared mid-redirect, Firebase will confirm it).
   useEffect(() => {
     if (!user?.uid || !location.pathname.startsWith('/app')) return;
+    if (showOnboarding) return; // don't stack on top of onboarding
+    const creationTime = user?.metadata?.creationTime
+      ? new Date(user.metadata.creationTime).getTime()
+      : null;
+    const accountAgeMs = creationTime ? Date.now() - creationTime : Infinity;
+    if (accountAgeMs < 24 * 60 * 60 * 1000) return; // < 24 h old — just signed up
     let cancelled = false;
     needsReconsentAsync(user?.email ?? null).then((needed) => {
       if (!cancelled) setShowReConsentModal(needed);
     });
     return () => { cancelled = true; };
-  }, [user?.uid, user?.email, location.pathname]);
+  }, [user?.uid, user?.email, user?.metadata?.creationTime, location.pathname, showOnboarding]);
 
   const handleReConsentAgree = async () => {
     try {

@@ -23,6 +23,7 @@ const PRESERVED_KEYS = [
   'tpprover_has_seeded',
   'tpprover_sample_data_cleared',
   'tpprover_demo_banner_dismissed',
+  'tpprover_agreement_history', // Legal agreements — must survive login/session transitions
 ];
 
 export function clearAppData(prefix = 'tpprover_') {
