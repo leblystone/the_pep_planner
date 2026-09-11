@@ -36,10 +36,25 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
   const [connecting, setConnecting] = useState(null);
   const [disconnecting, setDisconnecting] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  const [importingEtsy, setImportingEtsy] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
   const [credForm, setCredForm] = useState({ platform: 'etsy', clientId: '', clientSecret: '' });
   const [savingCreds, setSavingCreds] = useState(false);
   const [syncHistory, setSyncHistory] = useState([]);
+  const [showWebhook, setShowWebhook] = useState(true);
+  const [webhookStatus, setWebhookStatus] = useState(null);
+  const [webhookSecret, setWebhookSecret] = useState('');
+  const [savingWebhook, setSavingWebhook] = useState(false);
+
+  const loadWebhookStatus = useCallback(async () => {
+    try {
+      const getStatus = httpsCallable(functions, 'getEtsyWebhookStatus');
+      const { data } = await getStatus();
+      setWebhookStatus(data || null);
+    } catch (err) {
+      console.error('Webhook status error:', err);
+    }
+  }, []);
 
   const loadStatus = useCallback(async () => {
     const getStatus = httpsCallable(functions, 'getMarketplaceStatus');
@@ -51,11 +66,11 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([loadProducts(), loadStatus(), loadRevenue()]);
+      await Promise.all([loadProducts(), loadStatus(), loadRevenue(), loadWebhookStatus()]);
     } finally {
       setLoading(false);
     }
-  }, [loadStatus]);
+  }, [loadStatus, loadWebhookStatus]);
 
   useEffect(() => {
     loadAll();
@@ -186,6 +201,44 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
     }
   };
 
+  const handleImportEtsyOrders = async () => {
+    if (!isPlatformConnected('etsy')) {
+      toast('warning', 'Connect Etsy first, then import orders');
+      return;
+    }
+    setImportingEtsy(true);
+    try {
+      const importEtsy = httpsCallable(functions, 'syncEtsyOrders');
+      const { data } = await importEtsy({ daysBack: 90, applyStock: true });
+      const {
+        scanned = 0,
+        imported = 0,
+        updated = 0,
+        stockApplied = 0,
+        skipped = 0,
+        errors = [],
+      } = data || {};
+      if (errors.length > 0) {
+        toast(
+          'info',
+          `Etsy: scanned ${scanned} — ${imported} new, ${stockApplied || updated} stock adjusted, ${errors.length} error(s)`,
+        );
+      } else if (imported === 0 && stockApplied === 0) {
+        toast('success', `Etsy up to date (${scanned} receipts scanned, ${skipped} already imported)`);
+      } else {
+        toast(
+          'success',
+          `Etsy import done — ${imported} new order${imported !== 1 ? 's' : ''}, ${stockApplied} stock adjustment${stockApplied !== 1 ? 's' : ''}`,
+        );
+      }
+    } catch (err) {
+      console.error('Etsy import error:', err);
+      toast('error', err.details || err.message || 'Etsy import failed');
+    } finally {
+      setImportingEtsy(false);
+    }
+  };
+
   const handleSyncAll = async () => {
     setSyncing(true);
     try {
@@ -210,6 +263,32 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
       toast('error', err.details || err.message || 'Sync failed');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSaveWebhookSecret = async (e) => {
+    e.preventDefault();
+    setSavingWebhook(true);
+    try {
+      const save = httpsCallable(functions, 'saveEtsyWebhookConfig');
+      await save({ signingSecret: webhookSecret.trim() });
+      toast('success', 'Etsy webhook signing secret saved');
+      setWebhookSecret('');
+      await loadWebhookStatus();
+    } catch (err) {
+      toast('error', err.message || 'Failed to save webhook secret');
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
+  const copyWebhookUrl = async () => {
+    const url = webhookStatus?.webhookUrl || 'https://us-central1-tpp-splendide.cloudfunctions.net/etsyOrderWebhook';
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('success', 'Webhook URL copied');
+    } catch {
+      toast('info', url);
     }
   };
 
@@ -318,6 +397,79 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
       <div className="rounded-xl border overflow-hidden" style={{ backgroundColor: theme.cardBackground, borderColor: theme.border }}>
         <button
           type="button"
+          onClick={() => setShowWebhook((v) => !v)}
+          className="w-full flex items-center justify-between p-4 text-left"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <LinkIcon size={16} style={{ color: theme.primary }} />
+            <span className="text-sm font-bold" style={{ color: theme.text }}>Etsy Webhooks (real-time orders)</span>
+            {webhookStatus?.secretConfigured ? (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>
+                <CheckCircle size={12} /> Secret saved
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>
+                <Warning size={12} /> Needs signing secret
+              </span>
+            )}
+          </div>
+          <span className="text-xs font-semibold" style={{ color: theme.primary }}>{showWebhook ? 'Hide' : 'Show'}</span>
+        </button>
+        {showWebhook && (
+          <form onSubmit={handleSaveWebhookSecret} className="px-4 pb-4 space-y-3 border-t" style={{ borderColor: theme.border }}>
+            <ol className="text-xs pt-3 space-y-1.5 list-decimal list-inside" style={{ color: theme.textLight }}>
+              <li>Open <a href="https://www.etsy.com/developers/your-apps" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: theme.primary }}>Etsy Developer → Your apps</a></li>
+              <li>Select your app → <strong>Go to Webhook portal</strong> → <strong>+ Add Endpoint</strong></li>
+              <li>Paste the callback URL below and subscribe to <code className="text-[10px]">order.paid</code> (optional: order.shipped, order.canceled)</li>
+              <li>Copy the signing secret (<code className="text-[10px]">whsec_…</code>) and paste it here</li>
+              <li>Use the portal <strong>Testing</strong> tab to send a test event — should return 200</li>
+            </ol>
+            <div className="flex gap-2 items-stretch">
+              <code
+                className="flex-1 text-[10px] break-all px-3 py-2 rounded-lg border"
+                style={{ borderColor: theme.border, backgroundColor: theme.background, color: theme.text }}
+              >
+                {webhookStatus?.webhookUrl || 'https://us-central1-tpp-splendide.cloudfunctions.net/etsyOrderWebhook'}
+              </code>
+              <button
+                type="button"
+                onClick={copyWebhookUrl}
+                className="px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap"
+                style={{ backgroundColor: `${theme.primary}15`, color: theme.primary }}
+              >
+                Copy URL
+              </button>
+            </div>
+            {webhookStatus?.secretPreview && (
+              <p className="text-xs" style={{ color: theme.textLight }}>
+                Current secret: <code>{webhookStatus.secretPreview}</code>
+                {webhookStatus.secretSource === 'env' ? ' (from server env)' : ''}
+              </p>
+            )}
+            <input
+              type="password"
+              placeholder="whsec_… (from Etsy Webhook portal)"
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border text-sm font-mono"
+              style={{ borderColor: theme.border, backgroundColor: theme.background, color: theme.text }}
+              autoComplete="off"
+            />
+            <button
+              type="submit"
+              disabled={savingWebhook || !webhookSecret.trim().startsWith('whsec_')}
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
+              style={{ backgroundColor: theme.primary }}
+            >
+              {savingWebhook ? 'Saving…' : 'Save signing secret'}
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div className="rounded-xl border overflow-hidden" style={{ backgroundColor: theme.cardBackground, borderColor: theme.border }}>
+        <button
+          type="button"
           onClick={() => setShowCredentials((v) => !v)}
           className="w-full flex items-center justify-between p-4 text-left"
         >
@@ -334,10 +486,6 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
               <span className="block">
                 OAuth redirect URL:{' '}
                 <code className="text-[10px] break-all">https://us-central1-tpp-splendide.cloudfunctions.net/marketplaceOAuthCallback</code>
-              </span>
-              <span className="block">
-                Etsy webhook URL (order.paid):{' '}
-                <code className="text-[10px] break-all">https://us-central1-tpp-splendide.cloudfunctions.net/etsyOrderWebhook</code>
               </span>
             </p>
             <div className="flex gap-2">
@@ -421,16 +569,29 @@ export default function AdminMarketplaces({ embedded = false, theme: themeProp }
               {products.length} products
             </span>
           </div>
-          <button
-            type="button"
-            onClick={handleSyncAll}
-            disabled={syncing}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
-            style={{ backgroundColor: theme.primary }}
-          >
-            {syncing ? <CircleNotch size={12} className="animate-spin" /> : <ArrowsClockwise size={12} />}
-            {syncing ? 'Syncing…' : 'Sync All Now'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <button
+              type="button"
+              onClick={handleImportEtsyOrders}
+              disabled={importingEtsy || !isPlatformConnected('etsy')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-90 disabled:opacity-60 border"
+              style={{ borderColor: theme.border, color: theme.text, backgroundColor: `${theme.text}06` }}
+              title={!isPlatformConnected('etsy') ? 'Connect Etsy first' : 'Pull recent Etsy sales into Shop Orders and adjust stock'}
+            >
+              {importingEtsy ? <CircleNotch size={12} className="animate-spin" /> : <ShoppingBag size={12} />}
+              {importingEtsy ? 'Importing…' : 'Import Etsy Orders'}
+            </button>
+            <button
+              type="button"
+              onClick={handleSyncAll}
+              disabled={syncing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
+              style={{ backgroundColor: theme.primary }}
+            >
+              {syncing ? <CircleNotch size={12} className="animate-spin" /> : <ArrowsClockwise size={12} />}
+              {syncing ? 'Syncing…' : 'Sync All Now'}
+            </button>
+          </div>
         </div>
 
         {/* Sync history */}

@@ -421,8 +421,12 @@ async function runAppleReconciliation(db, options = {}) {
     };
   }
 
+  const details = [];
   for (const userId of userIds) {
     try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      const email = userDoc.exists ? (userDoc.data()?.email || userId) : userId;
+
       const subDoc = await db.collection('userSubscriptions').doc(userId).get();
       const beforeSub = subDoc.exists ? subDoc.data()?.subscription : null;
       const changeType = beforeSub?.lastStoreSyncedAt ? 'drift_corrected' : 'missing_restored';
@@ -435,6 +439,7 @@ async function runAppleReconciliation(db, options = {}) {
         synced++;
         if (result.normalizedOnly) normalizedOnly++;
         if (result.logged) options.logContext?.onLogged?.();
+        details.push({ userId, email, outcome: 'synced', status: result.status || 'synced' });
       } else if (
         result.reason === 'no_apple_subscription' ||
         result.reason === 'no_original_transaction_id'
@@ -442,9 +447,11 @@ async function runAppleReconciliation(db, options = {}) {
         skipped++;
       } else {
         failed++;
+        details.push({ userId, email, outcome: 'failed', reason: result.reason });
       }
     } catch (e) {
       failed++;
+      details.push({ userId, outcome: 'failed', reason: 'exception', error: e.message });
       logger.warn(`Apple sync failed for ${userId}`, e.message);
     }
   }
@@ -456,6 +463,7 @@ async function runAppleReconciliation(db, options = {}) {
     skipped,
     failed,
     logged,
+    details,
     note: 'Synced via App Store Server API (Production then Sandbox).',
   };
 }

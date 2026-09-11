@@ -586,3 +586,5 @@ exports.syncAllMarketplaceStock = onCall({ cors: true }, async (request) => {
 
 exports.updateEtsyListingStock = updateEtsyListingStock;
 exports.updateTikTokProductStock = updateTikTokProductStock;
+exports.etsyFetch = etsyFetch;
+exports.fetchEtsyShopId = fetchEtsyShopId;

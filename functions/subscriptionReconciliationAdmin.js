@@ -207,13 +207,23 @@ exports.getAdminSubscriptionReconciliationLog = onCall(
  * 4. Saves a full report to Firestore so results persist.
  */
 exports.scanAndFixSubscriptions = onCall(
-  { invoker: 'public', timeoutSeconds: 300, memory: '1GiB' },
+  { invoker: 'public', timeoutSeconds: 300, memory: '1GiB', secrets: APPLE_API_SECRETS },
   async (request) => {
     await ensureAdmin(request);
     const db = admin.firestore();
     const scannedBy = request.auth?.token?.email || request.auth?.uid || 'admin';
 
+    // Diagnostics — report which credentials are available
+    const diagnostics = {
+      stripeKey: !!process.env.STRIPE_SECRET_KEY,
+      googlePlayKey: !!process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY,
+      appleKeyId: !!process.env.APPLE_APP_STORE_KEY_ID,
+      appleIssuerId: !!process.env.APPLE_APP_STORE_ISSUER_ID,
+      applePrivateKey: !!process.env.APPLE_APP_STORE_PRIVATE_KEY,
+    };
+
     const report = {
+      diagnostics,
       android: { orphansFound: 0, autoRepaired: 0, stillOrphaned: 0, resynced: 0, details: [] },
       apple: { orphansFound: 0, autoRepaired: 0, stillOrphaned: 0, resynced: 0, details: [] },
       reconciliation: null,
@@ -222,10 +232,22 @@ exports.scanAndFixSubscriptions = onCall(
     // --- ANDROID: find orphans + auto-repair from webhookFailures ---
     try {
       const subSnap = await db.collection('userSubscriptions').get();
+      const usersSnap = await db.collection('users').get();
 
-      const androidOrphans = [];
+      // Build maps of all users
+      const userSubMap = {};
       for (const doc of subSnap.docs) {
-        const sub = doc.data()?.subscription || {};
+        userSubMap[doc.id] = doc.data()?.subscription || {};
+      }
+      const userEmailMap = {};
+      for (const doc of usersSnap.docs) {
+        userEmailMap[doc.id] = doc.data()?.email || null;
+      }
+      const allUserIds = new Set([...Object.keys(userSubMap), ...Object.keys(userEmailMap)]);
+
+      // Users already tagged as Android but missing token
+      const androidOrphans = [];
+      for (const [uid, sub] of Object.entries(userSubMap)) {
         const isAndroid =
           sub.paymentProvider === 'google_play' ||
           sub.paymentProvider === 'googleplay' ||
@@ -233,42 +255,104 @@ exports.scanAndFixSubscriptions = onCall(
           sub.platform === 'google-play' ||
           sub.platform === 'googleplay';
         if (isAndroid && !sub.googlePlayPurchaseToken) {
-          androidOrphans.push({ userId: doc.id, email: sub.userEmail || sub.email || null });
+          androidOrphans.push({ userId: uid, email: sub.userEmail || sub.email || userEmailMap[uid] || null });
+        }
+      }
+
+      // Pull ALL google_play webhook failures
+      const failSnap = await db.collection('webhookFailures')
+        .where('source', '==', 'google_play')
+        .get();
+      logger.info(`📋 Android orphan scan: ${androidOrphans.length} tagged orphans, ${failSnap.size} webhook failures`);
+
+      const tokenByUid = {};
+      const unclaimedTokens = []; // tokens without obfuscatedExternalAccountId
+      for (const fdoc of failSnap.docs) {
+        const fd = fdoc.data();
+        if (fd.purchaseToken && fd.obfuscatedExternalAccountId) {
+          tokenByUid[fd.obfuscatedExternalAccountId] = fd.purchaseToken;
+        } else if (fd.purchaseToken && !fd.obfuscatedExternalAccountId) {
+          unclaimedTokens.push(fd.purchaseToken);
+        }
+      }
+
+      // RESOLVE UNCLAIMED TOKENS: call v2 API to discover which user owns each token
+      const { getPlayClient, PACKAGE_NAME } = (() => {
+        try {
+          const gps = require('./googlePlaySubscriptionSync');
+          return { getPlayClient: gps.getPlayClient || null, PACKAGE_NAME: 'com.thepepplanner.app' };
+        } catch (_) { return { getPlayClient: null, PACKAGE_NAME: 'com.thepepplanner.app' }; }
+      })();
+
+      // Also try the play client directly for unclaimed tokens
+      let playClient = null;
+      try {
+        const keyValue = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
+        if (keyValue) {
+          const { google } = require('googleapis');
+          const serviceAccountKey = JSON.parse(keyValue.trim().replace(/\r?\n/g, ''));
+          const auth = new google.auth.GoogleAuth({ credentials: serviceAccountKey, scopes: ['https://www.googleapis.com/auth/androidpublisher'] });
+          playClient = google.androidpublisher({ version: 'v3', auth });
+        }
+      } catch (_) {}
+
+      if (playClient && unclaimedTokens.length > 0) {
+        logger.info(`🔍 Resolving ${unclaimedTokens.length} unclaimed tokens via v2 API...`);
+        for (const token of unclaimedTokens) {
+          try {
+            const v2 = await playClient.purchases.subscriptionsv2.get({
+              packageName: 'com.thepepplanner.app',
+              token,
+            });
+            const uid = v2.data?.externalAccountIdentifiers?.obfuscatedExternalAccountId;
+            if (uid && allUserIds.has(uid) && !tokenByUid[uid]) {
+              tokenByUid[uid] = token;
+              logger.info(`✅ Resolved unclaimed token → user ${uid}`);
+            }
+          } catch (e) {
+            // Token expired or invalid — skip
+          }
+        }
+      }
+
+      // REVERSE LOOKUP: match webhook UIDs to users not tagged as Android
+      for (const [uid, token] of Object.entries(tokenByUid)) {
+        if (!allUserIds.has(uid)) continue;
+        const existingSub = userSubMap[uid] || {};
+        const alreadyHasToken = !!existingSub.googlePlayPurchaseToken;
+        const alreadyOrphan = androidOrphans.some(o => o.userId === uid);
+        if (!alreadyHasToken && !alreadyOrphan) {
+          androidOrphans.push({
+            userId: uid,
+            email: userEmailMap[uid] || existingSub.userEmail || existingSub.email || null,
+            fromReverseLookup: true,
+          });
         }
       }
 
       report.android.orphansFound = androidOrphans.length;
+      logger.info(`🔧 Android: ${androidOrphans.length} total orphans (incl reverse lookup), ${Object.keys(tokenByUid).length} tokens resolved`);
 
       if (androidOrphans.length > 0) {
-        // Pull ALL google_play webhook failures that have a token + UID
-        const failSnap = await db.collection('webhookFailures')
-          .where('source', '==', 'google_play')
-          .get();
-
-        const tokenByUid = {};
-        const tokenByToken = {};
-        for (const fdoc of failSnap.docs) {
-          const fd = fdoc.data();
-          if (fd.purchaseToken && fd.obfuscatedExternalAccountId) {
-            tokenByUid[fd.obfuscatedExternalAccountId] = fd.purchaseToken;
-          }
-          if (fd.purchaseToken) {
-            tokenByToken[fdoc.id] = fd;
-          }
-        }
-
         for (const orphan of androidOrphans) {
           const token = tokenByUid[orphan.userId];
           if (token) {
-            // Auto-seed the token
             await db.collection('userSubscriptions').doc(orphan.userId).set(
-              { subscription: { googlePlayPurchaseToken: token } },
+              { subscription: {
+                googlePlayPurchaseToken: token,
+                paymentProvider: 'googleplay',
+                source: 'googleplay',
+                platform: 'google-play',
+              } },
               { merge: true }
             );
             report.android.autoRepaired++;
-            report.android.details.push({ userId: orphan.userId, email: orphan.email, action: 'token_seeded' });
+            report.android.details.push({
+              userId: orphan.userId, email: orphan.email,
+              action: 'token_seeded',
+              reverseLookup: !!orphan.fromReverseLookup,
+            });
 
-            // Re-sync from Google Play
             try {
               await syncUserGooglePlayFromStore(db, orphan.userId, { logContext: { runBy: scannedBy } });
               report.android.resynced++;
@@ -282,6 +366,7 @@ exports.scanAndFixSubscriptions = onCall(
         }
       }
     } catch (err) {
+      logger.error('Android orphan scan error:', err);
       report.android.error = err.message;
     }
 
@@ -329,35 +414,49 @@ exports.scanAndFixSubscriptions = onCall(
       } else if (appleOrphans.length > 0) {
         report.apple.stillOrphaned = appleOrphans.length;
         report.apple.note = 'Apple API credentials not configured — cannot auto-repair.';
+        for (const orphan of appleOrphans) {
+          report.apple.details.push({ userId: orphan.userId, email: orphan.email, action: 'no_txn_id' });
+        }
       }
     } catch (err) {
       report.apple.error = err.message;
     }
 
     // --- Run full reconciliation for users that DO have tokens ---
-    try {
-      const reconResult = {};
-      reconResult.stripe = await runDailyStripeReconciliation(db, { maxUsers: 500 });
-      try { reconResult.googleplay = await runGooglePlayReconciliation(db, { maxUsers: 500 }); }
-      catch (e) { reconResult.googleplay = { error: e.message }; }
-      if (hasAppleApiCredentials()) {
-        try { reconResult.apple = await runAppleReconciliation(db, { maxUsers: 500 }); }
-        catch (e) { reconResult.apple = { error: e.message }; }
+    const reconResult = {};
+    for (const platform of ['stripe', 'googleplay', 'apple']) {
+      try {
+        reconResult[platform] = await runPlatformReconciliation(db, platform, { maxUsers: 500 });
+      } catch (e) {
+        reconResult[platform] = { error: e.message };
       }
-      report.reconciliation = reconResult;
-    } catch (err) {
-      report.reconciliation = { error: err.message };
     }
+    report.reconciliation = reconResult;
+
+    // Strip undefined values — Firestore rejects them
+    function stripUndefined(obj) {
+      if (Array.isArray(obj)) return obj.map(stripUndefined);
+      if (obj && typeof obj === 'object' && !(obj instanceof Date) && typeof obj.toDate !== 'function') {
+        const clean = {};
+        for (const [k, v] of Object.entries(obj)) {
+          if (v !== undefined) clean[k] = stripUndefined(v);
+        }
+        return clean;
+      }
+      return obj;
+    }
+
+    const cleanReport = stripUndefined(report);
 
     // Save the full report so it persists across page loads
     const ts = admin.firestore.FieldValue.serverTimestamp();
     await db.collection('subscriptionScans').doc('latest_repair').set({
       scannedAt: ts,
       scannedBy,
-      report,
+      report: cleanReport,
     });
 
-    return { success: true, report, scannedBy };
+    return { success: true, report: cleanReport, scannedBy };
   }
 );
 

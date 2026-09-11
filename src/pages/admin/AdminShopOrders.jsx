@@ -39,17 +39,23 @@ function isOrderCancelled(status) {
 }
 
 function OrderSelectCheckbox({ checked, onClick, theme, className = '' }) {
+  const toggle = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick?.(e);
+  };
+
   return (
-    <button
-      type="button"
+    <span
       role="checkbox"
+      tabIndex={0}
       aria-checked={checked}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick?.(e);
+      onClick={toggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') toggle(e);
       }}
-      className={`w-5 h-5 rounded-sm border-2 relative flex items-center justify-center flex-shrink-0 transition-all hover:scale-110 ${className}`}
+      className={`w-5 h-5 rounded-sm border-2 relative inline-flex items-center justify-center flex-shrink-0 transition-all hover:scale-110 cursor-pointer ${className}`}
       style={{
         borderColor: checked
           ? (theme.primaryDark || theme.primary)
@@ -63,7 +69,7 @@ function OrderSelectCheckbox({ checked, onClick, theme, className = '' }) {
         <Check
           size={14}
           weight="bold"
-          className="absolute text-white order-check-pop"
+          className="absolute text-white order-check-pop pointer-events-none"
           style={{
             strokeWidth: 2.5,
             top: -3,
@@ -71,7 +77,7 @@ function OrderSelectCheckbox({ checked, onClick, theme, className = '' }) {
           }}
         />
       )}
-    </button>
+    </span>
   );
 }
 

@@ -209,7 +209,18 @@ async function handleSubscriptionNotification(notification) {
 
   const subscriptionDetails = await getSubscriptionDetails(subscriptionId, purchaseToken);
   if (!subscriptionDetails) {
-    logger.error('❌ Could not retrieve subscription details');
+    logger.error('❌ Could not retrieve subscription details — saving raw notification to webhookFailures');
+    const db = admin.firestore();
+    await db.collection('webhookFailures').add({
+      source: 'google_play',
+      error: 'getSubscriptionDetails returned null — could not verify with Google Play API',
+      notificationType,
+      subscriptionId,
+      purchaseToken,
+      obfuscatedExternalAccountId: null,
+      timestamp: FieldValue.serverTimestamp(),
+      note: 'Raw token saved. The scan can resolve the owner via v2 API.',
+    });
     return;
   }
 

@@ -232,12 +232,16 @@ async function runDailyStripeReconciliation(db, stripe, options = {}) {
   let failed = 0;
   let driftDetected = 0;
   let logged = 0;
+  const details = [];
   if (options.logContext) {
     options.logContext.onLogged = () => { logged += 1; };
   }
 
   for (const userId of toProcess) {
     try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      const email = userDoc.exists ? (userDoc.data()?.email || userId) : userId;
+
       const subDoc = await db.collection('userSubscriptions').doc(userId).get();
       const firestoreSub = subDoc.exists ? subDoc.data()?.subscription : null;
 
@@ -279,9 +283,14 @@ async function runDailyStripeReconciliation(db, stripe, options = {}) {
       if (result.success) {
         synced++;
         if (result.logged) options.logContext?.onLogged?.();
-      } else failed++;
+        details.push({ userId, email, outcome: 'synced', status: result.status || 'synced' });
+      } else {
+        failed++;
+        details.push({ userId, email, outcome: 'failed', reason: result.reason });
+      }
     } catch (err) {
       failed++;
+      details.push({ userId, outcome: 'failed', reason: 'exception', error: err.message });
       console.warn(`Reconciliation failed for ${userId}:`, err.message);
     }
   }
@@ -310,6 +319,7 @@ async function runDailyStripeReconciliation(db, stripe, options = {}) {
     driftDetected,
     logged,
     truncated: userIds.length > maxUsers,
+    details,
   };
 }
 

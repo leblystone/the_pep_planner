@@ -6,36 +6,82 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 const { getMarketplaceTokens, refreshTokenIfNeeded } = require('./marketplaceTokens');
+const { getEtsyWebhookSecret } = require('./etsyWebhookSecret');
 
 function getRawBody(req) {
-  if (typeof req.rawBody !== 'undefined') return req.rawBody;
-  return Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}));
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
+  if (typeof req.rawBody === 'string') return Buffer.from(req.rawBody);
+  if (typeof req.body === 'string') return Buffer.from(req.body);
+  return Buffer.from(JSON.stringify(req.body || {}));
+}
+
+function headerVal(req, ...names) {
+  for (const name of names) {
+    const v = req.headers[name] ?? req.headers[name.toLowerCase()];
+    if (v) return Array.isArray(v) ? v[0] : String(v);
+  }
+  return '';
+}
+
+function etsySignatureCandidates(header) {
+  // Svix/Etsy: "v1,base64sig" or space-separated "v1,sig1 v1,sig2"
+  return String(header)
+    .split(/[\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (part.startsWith('v1,')) return part.slice(3);
+      if (part.startsWith('v1=')) return part.slice(3);
+      const eq = part.indexOf('=');
+      if (eq > 0) return part.slice(eq + 1);
+      return part;
+    })
+    .filter(Boolean);
+}
+
+function signaturesMatch(expected, candidate) {
+  try {
+    const a = Buffer.from(expected);
+    const b = Buffer.from(candidate);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Etsy Open API v3 webhook signature (Svix-style).
  * Headers: webhook-id, webhook-timestamp, webhook-signature
  * Secret: whsec_<base64>
+ *
+ * Timestamp window is 48h so Etsy retries / Replay still verify (they reuse
+ * the original webhook-timestamp; retries go out to ~27 hours).
  */
-function verifyEtsyWebhookSignature(req) {
-  const secretRaw = (process.env.ETSY_WEBHOOK_SECRET || '').trim();
+async function verifyEtsyWebhookSignature(req) {
+  const secretRaw = await getEtsyWebhookSecret();
   if (!secretRaw) {
-    logger.error('ETSY_WEBHOOK_SECRET not set — rejecting webhook');
+    logger.error('ETSY_WEBHOOK_SECRET not set — rejecting webhook (set in Admin → Marketplaces or Firebase env)');
     return false;
   }
 
-  const webhookId = req.headers['webhook-id'];
-  const webhookTimestamp = req.headers['webhook-timestamp'];
-  const webhookSignature = req.headers['webhook-signature'];
+  const webhookId = headerVal(req, 'webhook-id', 'svix-id');
+  const webhookTimestamp = headerVal(req, 'webhook-timestamp', 'svix-timestamp');
+  const webhookSignature = headerVal(req, 'webhook-signature', 'svix-signature');
   if (!webhookId || !webhookTimestamp || !webhookSignature) {
-    logger.warn('Etsy webhook missing signature headers');
+    logger.warn('Etsy webhook missing signature headers', {
+      hasId: !!webhookId,
+      hasTs: !!webhookTimestamp,
+      hasSig: !!webhookSignature,
+      headerKeys: Object.keys(req.headers || {}),
+    });
     return false;
   }
 
-  // Reject stale / future timestamps (±5 minutes)
   const ts = Number(webhookTimestamp);
-  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
-    logger.warn('Etsy webhook timestamp out of range', { webhookTimestamp });
+  const ageSec = Number.isFinite(ts) ? Math.abs(Date.now() / 1000 - ts) : NaN;
+  // Cover Etsy retry schedule (up to ~27h) plus Replay of recent tests.
+  if (!Number.isFinite(ts) || ageSec > 48 * 60 * 60) {
+    logger.warn('Etsy webhook timestamp out of range', { webhookTimestamp, ageSec });
     return false;
   }
 
@@ -44,30 +90,26 @@ function verifyEtsyWebhookSignature(req) {
   try {
     secretBytes = Buffer.from(secretPart, 'base64');
   } catch {
+    logger.error('ETSY_WEBHOOK_SECRET is not valid base64 after whsec_ prefix');
     return false;
   }
 
   const rawBody = getRawBody(req);
   const signedContent = `${webhookId}.${webhookTimestamp}.${rawBody.toString('utf8')}`;
   const expected = crypto.createHmac('sha256', secretBytes).update(signedContent).digest('base64');
+  const candidates = etsySignatureCandidates(webhookSignature);
+  const ok = candidates.some((candidate) => signaturesMatch(expected, candidate));
 
-  // Header may be "v1,<sig>" or comma-separated versioned signatures
-  const candidates = String(webhookSignature)
-    .split(' ')
-    .flatMap((part) => part.split(','))
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => (s.startsWith('v1,') ? s.slice(3) : s.includes('=') ? s.split('=')[1] : s));
+  if (!ok) {
+    logger.warn('Etsy webhook signature mismatch', {
+      ageSec: Math.round(ageSec),
+      candidateCount: candidates.length,
+      hasRawBody: Buffer.isBuffer(req.rawBody) || typeof req.rawBody === 'string',
+      bodyType: typeof req.body,
+    });
+  }
 
-  return candidates.some((candidate) => {
-    try {
-      const a = Buffer.from(expected);
-      const b = Buffer.from(candidate);
-      return a.length === b.length && crypto.timingSafeEqual(a, b);
-    } catch {
-      return false;
-    }
-  });
+  return ok;
 }
 
 /**
@@ -169,13 +211,14 @@ async function resolveEtsyOrderPayload(payload) {
   if (inlineTx.length) {
     return {
       receiptId: payload.receipt_id || payload.id,
+      receipt: payload,
       transactions: inlineTx,
       eventType: payload.event_type || 'legacy',
     };
   }
 
   if (!payload.resource_url) {
-    return { receiptId: null, transactions: [], eventType: payload.event_type || null };
+    return { receiptId: null, receipt: null, transactions: [], eventType: payload.event_type || null };
   }
 
   const tokens = await getMarketplaceTokens();
@@ -199,6 +242,7 @@ async function resolveEtsyOrderPayload(payload) {
 
   return {
     receiptId: receiptId || receipt.receipt_id,
+    receipt,
     transactions,
     eventType: payload.event_type || null,
   };
@@ -294,7 +338,7 @@ async function syncStockToAllPlatforms(productId) {
 // ---------------------------------------------------------------------------
 
 exports.etsyOrderWebhook = onRequest(
-  { cors: false },
+  { cors: false, invoker: 'public', secrets: ['ETSY_WEBHOOK_SECRET'] },
   async (req, res) => {
   try {
     if (req.method !== 'POST') {
@@ -302,9 +346,22 @@ exports.etsyOrderWebhook = onRequest(
       return;
     }
 
-    if (!verifyEtsyWebhookSignature(req)) {
+    if (!(await verifyEtsyWebhookSignature(req))) {
+      logger.warn('Etsy webhook rejected: invalid or missing signature');
       res.status(401).json({ error: 'Invalid signature' });
       return;
+    }
+
+    const webhookId = req.headers['webhook-id'];
+    const db = admin.firestore();
+    if (webhookId) {
+      const dedupeRef = db.collection('processedWebhookEvents').doc(`etsy_${webhookId}`);
+      const seen = await dedupeRef.get();
+      if (seen.exists) {
+        logger.info('Etsy webhook duplicate — already processed', { webhookId });
+        res.status(200).json({ ok: true, duplicate: true });
+        return;
+      }
     }
 
     const payload = req.body || {};
@@ -333,7 +390,7 @@ exports.etsyOrderWebhook = onRequest(
       return;
     }
 
-    const { receiptId, transactions } = await resolveEtsyOrderPayload(payload);
+    const { receiptId, receipt, transactions } = await resolveEtsyOrderPayload(payload);
 
     if (!transactions.length) {
       logger.warn('Etsy webhook had no transactions to process', { receiptId, eventType });
@@ -341,45 +398,33 @@ exports.etsyOrderWebhook = onRequest(
       return;
     }
 
-    const db = admin.firestore();
-    const results = [];
+    const { processEtsyReceipt } = require('./etsyOrders');
 
-    for (const txn of transactions) {
-      const etsyListingId = String(txn.listing_id);
-      const qty = txn.quantity || 1;
+    const receiptData = receipt && (receipt.receipt_id || receipt.id)
+      ? receipt
+      : { receipt_id: receiptId, ...payload };
 
-      const snap = await db.collection('shopProducts')
-        .where('platformIds.etsy', '==', etsyListingId)
-        .limit(1)
-        .get();
-
-      if (snap.empty) {
-        logger.warn(`No shopProduct found for Etsy listing ${etsyListingId}`);
-        results.push({ etsyListingId, status: 'not_found' });
-        continue;
-      }
-
-      const productDoc = snap.docs[0];
-      try {
-        const newStock = await decrementStock(productDoc.id, qty);
-        await syncStockToAllPlatforms(productDoc.id);
-        results.push({ etsyListingId, productId: productDoc.id, newStock, status: 'decremented' });
-      } catch (err) {
-        logger.error(`Failed to decrement stock for Etsy listing ${etsyListingId}:`, err);
-        results.push({ etsyListingId, productId: productDoc.id, status: 'error', error: err.message });
-      }
-    }
-
-    await db.collection('physicalOrders').add({
-      source: 'etsy',
-      externalOrderId: String(receiptId),
-      payload,
-      results,
-      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    const result = await processEtsyReceipt(db, {
+      receipt: receiptData,
+      transactions,
+      webhookPayload: payload,
+      triggeredBy: 'etsy-webhook',
+      applyStock: true,
     });
 
-    logger.info(`Etsy order ${receiptId} processed`, { results });
-    res.status(200).json({ ok: true, results });
+    if (webhookId) {
+      await db.collection('processedWebhookEvents').doc(`etsy_${webhookId}`).set({
+        source: 'etsy',
+        webhookId: String(webhookId),
+        eventType: payload.event_type || null,
+        receiptId: String(receiptId),
+        orderId: result.orderId,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    logger.info(`Etsy order ${receiptId} processed`, result);
+    res.status(200).json({ ok: true, ...result });
   } catch (err) {
     logger.error('etsyOrderWebhook error:', err);
     res.status(500).json({ error: err.message });

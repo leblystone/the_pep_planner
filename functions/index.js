@@ -155,6 +155,17 @@ exports.disconnectMarketplace = marketplaces.disconnectMarketplace;
 exports.saveMarketplaceAppCredentials = marketplaces.saveMarketplaceAppCredentials;
 exports.syncAllMarketplaceStock = marketplaces.syncAllMarketplaceStock;
 
+const etsyOrders = require('./etsyOrders');
+exports.syncEtsyOrders = etsyOrders.syncEtsyOrders;
+exports.scheduledEtsyOrderSync = etsyOrders.scheduledEtsyOrderSync;
+
+const {
+  getEtsyWebhookStatus,
+  saveEtsyWebhookConfig,
+} = require('./etsyWebhookAdmin');
+exports.getEtsyWebhookStatus = getEtsyWebhookStatus;
+exports.saveEtsyWebhookConfig = saveEtsyWebhookConfig;
+
 // Manual order entry
 const manualOrder = require('./manualOrder');
 exports.createManualOrder = manualOrder.createManualOrder;
