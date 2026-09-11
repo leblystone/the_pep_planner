@@ -433,14 +433,12 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             setFormData({ email: '', message: '' });
             setSelectedImages([]);
             
-            // Auto-close after 5 seconds, but user can dismiss earlier with "Done" button
+            // Auto-close after 5 seconds (unconditional - user can dismiss earlier with "Done" button)
             console.log('⏱️ Scheduling modal auto-close in 5 seconds');
             setTimeout(() => {
                 console.log('⏱️ Auto-closing modal after success confirmation');
-                if (submitStatus === 'success') {
-                    setSubmitStatus(null);
-                    handleClose();
-                }
+                setSubmitStatus(null);
+                handleClose();
             }, 5000);
         } catch (error) {
             console.error('❌ Error creating support ticket:', error);
