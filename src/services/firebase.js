@@ -1223,6 +1223,38 @@ export async function getAdminSubscriptionReconciliationLog(opts = {}) {
   return result.data;
 }
 
+/** Admin: find Android users with Play purchases that are missing/orphaned in Firestore. */
+export async function findOrphanedAndroidUsers(opts = {}) {
+  const functions = getFunctions();
+  const fn = httpsCallable(functions, 'findOrphanedAndroidUsers');
+  const result = await fn(opts);
+  return result.data;
+}
+
+/** Admin: recent Google Play webhook / RTDN processing failures. */
+export async function getGooglePlayWebhookFailures(opts = {}) {
+  const functions = getFunctions();
+  const fn = httpsCallable(functions, 'getGooglePlayWebhookFailures');
+  const result = await fn(opts);
+  return result.data;
+}
+
+/** Admin: find Apple users with StoreKit purchases that are missing/orphaned in Firestore. */
+export async function findOrphanedAppleUsers(opts = {}) {
+  const functions = getFunctions();
+  const fn = httpsCallable(functions, 'findOrphanedAppleUsers');
+  const result = await fn(opts);
+  return result.data;
+}
+
+/** Admin: recent Apple App Store Server Notification failures. */
+export async function getAppleWebhookFailures(opts = {}) {
+  const functions = getFunctions();
+  const fn = httpsCallable(functions, 'getAppleWebhookFailures');
+  const result = await fn(opts);
+  return result.data;
+}
+
 export async function scanAndFixSubscriptions() {
   const functions = getFunctions();
   const fn = httpsCallable(functions, 'scanAndFixSubscriptions', { timeout: 300000 });
