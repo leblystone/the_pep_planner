@@ -95,6 +95,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     const liveTickets = useMemo(() => inboxTickets ?? [], [inboxTickets]);
     const [showHistoryChat, setShowHistoryChat] = useState(false);
     const [showAdminMessage, setShowAdminMessage] = useState(false);
+    const [showPreviousTickets, setShowPreviousTickets] = useState(false);
 
     // When the open ticket is closed server-side, drop back to the hub (not a live DM).
     useEffect(() => {
