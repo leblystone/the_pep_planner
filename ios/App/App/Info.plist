@@ -60,6 +60,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan vial and product labels to autofill your stockpile.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Upload a label photo from your gallery to autofill your stockpile.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>
