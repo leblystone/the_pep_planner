@@ -331,12 +331,14 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             return;
         }
 
+        console.log('🚀 Starting submission...', { ticketType, userEmail: user?.email });
         setIsSubmitting(true);
         setSubmitStatus(null);
         setSubmitError(null);
         
         try {
             console.log('📤 Creating support ticket...', {
+                ticketType,
                 userEmail: user?.email,
                 userId: user?.uid,
                 message: formData.message.trim(),
@@ -367,7 +369,8 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             // Three separate flows: suggestion & bug = feedback only (Bugs/Feedback tab, "From the Team" if needed). Support = ticket (SupportChatModal).
             if (ticketType === 'suggestion' || ticketType === 'bug') {
                 // Submit as feedback only — no support ticket. Appears in admin Feedback & Bugs; reply via "From the Team" if warranted.
-                await submitFeedback({
+                console.log(`📝 Submitting ${ticketType} feedback...`);
+                const feedbackId = await submitFeedback({
                     type: ticketType,
                     message: formData.message.trim(),
                     userEmail: user?.email || 'anonymous',
@@ -376,7 +379,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                     url: window.location.href,
                     timestamp: new Date().toISOString()
                 });
-                console.log(`✅ ${ticketType === 'bug' ? 'Bug report' : 'Suggestion'} submitted to feedback`);
+                console.log(`✅ ${ticketType === 'bug' ? 'Bug report' : 'Suggestion'} submitted to feedback - ID:`, feedbackId);
             } else {
                 // Support only: create support ticket (open ticket → SupportChatModal)
                 const ticketId = await createSupportTicket({
@@ -410,6 +413,8 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                 window.dispatchEvent(new CustomEvent('tpp:support-inbox-changed'));
             }
             
+            // Show success confirmation
+            console.log('✅ Submission successful - showing success UI');
             setSubmitStatus('success');
             
             // Clean up preview URLs
@@ -423,13 +428,20 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             setFormData({ email: '', message: '' });
             setSelectedImages([]);
             
-            // Auto-close after 2 seconds
+            // Auto-close after 3 seconds to show success confirmation
+            console.log('⏱️ Scheduling modal close in 3 seconds');
             setTimeout(() => {
+                console.log('⏱️ Auto-closing modal after success confirmation');
                 setSubmitStatus(null);
                 handleClose();
-            }, 2000);
+            }, 3000);
         } catch (error) {
             console.error('❌ Error creating support ticket:', error);
+            console.error('❌ Error details:', {
+                message: error?.message,
+                code: error?.code,
+                stack: error?.stack?.substring(0, 200)
+            });
             
             // Extract meaningful error message
             let errorMessage = 'Something went wrong. Please try again.';
