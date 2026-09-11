@@ -13,7 +13,6 @@ import GlassmorphismDatePicker from '../common/GlassmorphismDatePicker';
 import DocumentationUpload from '../common/DocumentationUpload';
 import VialScannerModal from '../common/VialScannerModal';
 import COAPrefillBanner from '../common/COAPrefillBanner';
-import ConfirmationModal from '../ui/ConfirmationModal';
 import { prepareItemForSave } from '../../utils/userDataSave';
 import { generateId } from '../../utils/string';
 import { isConvertibleUnit, convertForStorage } from '../../utils/unitConversion';
@@ -24,16 +23,51 @@ import {
   PURPOSE_ICON_OPTIONS,
   PURPOSE_ICON_WEIGHT,
   getPurposeIconComponent,
+  getPurposeIconColor,
   inferPurposeIconFromCompound,
 } from '../../utils/protocolPurposeIcons';
+import { useIsSimpleMode } from '../../hooks/useIsSimpleMode';
+import { trackMoreOptionsClick } from '../../utils/moreOptionsTracking';
 
 const EMPTY_STOCKPILE_FORM = {
   name: '', mg: '', quantity: '', vendor: '', vendorId: null, purity: '', capColor: '', batchNumber: '', date: '', cost: '', priceUnit: 'vial', documentation: [], mgUnit: 'mg', unit: 'vial', purposeIcon: null,
 };
 
+const STOCKPILE_DRAFT_KEY = 'tpprover_stockpile_form_draft';
+
+const formHasDraftContent = (f) => !!(
+  f?.name?.trim()
+  || f?.mg?.trim()
+  || f?.vendor?.trim()
+  || f?.quantity?.trim()
+  || (f?.cost != null && String(f.cost).trim())
+  || f?.batchNumber?.trim()
+  || f?.purity?.trim()
+  || f?.capColor
+  || (Array.isArray(f?.documentation) && f.documentation.length > 0)
+);
+
+const loadStockpileDraft = () => {
+  try {
+    const raw = localStorage.getItem(STOCKPILE_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.data && formHasDraftContent(parsed.data)) {
+      return {
+        form: { ...EMPTY_STOCKPILE_FORM, ...parsed.data },
+        timestamp: parsed.timestamp ? new Date(parsed.timestamp) : null,
+      };
+    }
+  } catch (e) {
+    console.warn('Stockpile draft load failed:', e);
+  }
+  return null;
+};
+
 export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgrade, editItem = null, wishlistPrefill = null, onAddSupply = null, autoOpenScanner = false, zIndexClass }) {
   const { vendors, addVendor, setStockpile } = useAppContext();
   const { isReadOnly } = useSubscriptionAccess();
+  const simpleMode = useIsSimpleMode();
   const isEditing = !!editItem;
   const [form, setForm] = useState(() => ({ ...EMPTY_STOCKPILE_FORM }));
   const [isAmountFocused, setIsAmountFocused] = useState(false);
@@ -42,10 +76,9 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
   const [isAmountUnitDropdownOpen, setIsAmountUnitDropdownOpen] = useState(false);
   const [isUnitDropdownOpen, setIsUnitDropdownOpen] = useState(false);
   const [isPriceUnitDropdownOpen, setIsPriceUnitDropdownOpen] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(() => !simpleMode);
   const [isSavingToStockpile, setIsSavingToStockpile] = useState(false);
   const [saveError, setSaveError] = useState(null);
-  const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
   const [purposeIconMenuOpen, setPurposeIconMenuOpen] = useState(false);
   const [purposeMenuPlacement, setPurposeMenuPlacement] = useState(null);
   const [purposeIconFollowsName, setPurposeIconFollowsName] = useState(true);
@@ -54,13 +87,18 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
   const [coaParsing, setCoaParsing] = useState(false);
   const purposeIconAnchorRef = useRef(null);
   const purposeMenuPortalRef = useRef(null);
+  const openSessionRef = useRef(null);
 
-  const { isSaving, lastSaved, clearSavedData, markAsSubmitted, updateFormData } = useAutoSave(
-    'tpprover_stockpile_form_draft',
+  // Draft only while creating a new entry (not edit / wishlist / closed)
+  const draftEnabled = open && !isEditing && !wishlistPrefill;
+
+  const { isSaving, lastSaved, clearSavedData, markAsSubmitted, updateFormData, flushSave } = useAutoSave(
+    STOCKPILE_DRAFT_KEY,
     form,
     setForm,
-    2000,
-    async () => {}
+    800,
+    async () => {},
+    draftEnabled
   );
 
   // When opened from Inventory "Scan Vial", launch the camera after the sheet mounts
@@ -70,16 +108,21 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
     return () => clearTimeout(timer);
   }, [open, autoOpenScanner, editItem]);
 
-  // Pre-fill: edit existing, wishlist acquire → new stockpile, or blank new entry
+  // Pre-fill: edit existing, wishlist acquire → new stockpile, or restore draft / blank new entry
   useEffect(() => {
     if (!open) {
+      openSessionRef.current = null;
       setForm({ ...EMPTY_STOCKPILE_FORM });
       setCoaPrefill(null);
       setCoaParsing(false);
       setShowVialScanner(false);
+      setSaveError(null);
       return;
     }
+    // Simple: advanced collapsed. Advanced mode: open by default.
+    setShowAdvanced(!simpleMode);
     if (editItem) {
+      openSessionRef.current = `edit:${editItem.id}`;
       setPurposeIconFollowsName(!editItem.purposeIcon);
       setForm({
         name: editItem.name || '',
@@ -99,9 +142,12 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
         purposeIcon: editItem.purposeIcon || null,
       });
     } else if (wishlistPrefill) {
+      openSessionRef.current = 'wishlist';
+      try { localStorage.removeItem(STOCKPILE_DRAFT_KEY); } catch { /* ignore */ }
       clearSavedData();
       const vName = (wishlistPrefill.vendor || '').trim();
       const vHit = (vendors || []).find((v) => (v.name || '').trim().toLowerCase() === vName.toLowerCase());
+      setPurposeIconFollowsName(true);
       setForm({
         ...EMPTY_STOCKPILE_FORM,
         name: wishlistPrefill.name || '',
@@ -114,9 +160,14 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
         unit: wishlistPrefill.unit || 'vial',
       });
     } else {
-      setForm({ ...EMPTY_STOCKPILE_FORM });
+      // Only hydrate once per open so vendor list updates don't clobber typing
+      if (openSessionRef.current === 'new') return;
+      openSessionRef.current = 'new';
+      const draft = loadStockpileDraft();
+      setPurposeIconFollowsName(!(draft?.form?.purposeIcon));
+      setForm(draft?.form || { ...EMPTY_STOCKPILE_FORM });
     }
-  }, [open, editItem, wishlistPrefill, vendors, clearSavedData]);
+  }, [open, editItem, wishlistPrefill, vendors, clearSavedData, simpleMode]);
 
   const getPrimaryActionGradient = (saving) => {
     const secondaryColor = theme?.secondary || '#d1d5db';
@@ -125,22 +176,34 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
   };
   const primaryActionDefaultShadow = theme?.isDark ? '0 4px 6px rgba(0, 0, 0, 0.3)' : '0 4px 6px rgba(0, 0, 0, 0.1)';
 
+  // Drafts auto-save; closing keeps the draft. No "unsaved changes" popup.
   const handleClose = () => {
-    setShowAdvanced(false);
-    const hasData = form && (form.name || form.mg || form.vendor || form.quantity);
-    if (hasData && !isSavingToStockpile) {
-      setShowCloseConfirmation(true);
-      return;
+    // Flush BEFORE open=false — otherwise the debounce is cancelled and the draft is lost
+    if (!isEditing && !wishlistPrefill && formHasDraftContent(form)) {
+      try {
+        localStorage.setItem(STOCKPILE_DRAFT_KEY, JSON.stringify({
+          data: form,
+          timestamp: new Date().toISOString(),
+        }));
+      } catch (e) {
+        console.warn('Stockpile draft flush failed:', e);
+      }
+      flushSave();
     }
-    clearSavedData();
+    setShowAdvanced(false);
+    setPurposeIconMenuOpen(false);
     onClose();
   };
 
-  const handleConfirmClose = () => {
+  const handleDiscardDraft = () => {
+    try { localStorage.removeItem(STOCKPILE_DRAFT_KEY); } catch { /* ignore */ }
     clearSavedData();
-    setShowCloseConfirmation(false);
-    setShowAdvanced(false);
-    onClose();
+    setForm({ ...EMPTY_STOCKPILE_FORM });
+    setPurposeIconFollowsName(true);
+    setCoaPrefill(null);
+    setCoaParsing(false);
+    setSaveError(null);
+    setShowAdvanced(!simpleMode);
   };
 
   useEffect(() => {
@@ -167,16 +230,30 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
     return () => clearTimeout(timer);
   }, [form.name, purposeIconFollowsName]);
 
-  // Icon menu positioning
+  // Hide / close category picker while the name field is empty
+  useEffect(() => {
+    if (form.name?.trim()) return;
+    setPurposeIconMenuOpen(false);
+    setPurposeMenuPlacement(null);
+  }, [form.name]);
+
+  // Icon menu positioning — open below trigger, aligned left (opens to the right)
   useLayoutEffect(() => {
     if (!purposeIconMenuOpen || !purposeIconAnchorRef.current) return;
     const anchor = purposeIconAnchorRef.current;
     const sync = () => {
       const r = anchor.getBoundingClientRect();
+      const width = Math.min(260, Math.max(168, window.innerWidth - 16));
+      const margin = 8;
+      let left = r.left;
+      if (left + width > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - margin - width);
+      }
+      left = Math.max(margin, left);
       setPurposeMenuPlacement({
         top: r.bottom + 6,
-        right: Math.max(8, window.innerWidth - r.right),
-        width: Math.min(260, Math.max(168, window.innerWidth - 16)),
+        left,
+        width,
       });
     };
     sync();
@@ -208,17 +285,6 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
 
   return (
     <>
-      <ConfirmationModal
-        open={showCloseConfirmation}
-        onClose={() => setShowCloseConfirmation(false)}
-        onConfirm={handleConfirmClose}
-        title="Unsaved Changes"
-        message="You have unsaved changes. Are you sure you want to close without saving?"
-        confirmText="Close Without Saving"
-        cancelText="Cancel"
-        type="warning"
-        theme={theme}
-      />
       <BottomSheet 
         open={open} 
         onClose={handleClose} 
@@ -234,16 +300,35 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
             />
             {(isSaving || isSavingToStockpile) && (
               <span className="text-xs opacity-75" style={{ color: theme.textOnPrimary }}>
-                {isSavingToStockpile ? 'Saving...' : 'Auto-saving...'}
+                {isSavingToStockpile ? 'Saving...' : 'Draft saving...'}
               </span>
             )}
           </div>
         }
         theme={theme}
         maxHeight="90vh"
+        fitContent
         zIndexClass={zIndexClass}
         footer={(
-        <div className="w-full flex items-center justify-end gap-3">
+        <div className="w-full flex items-center justify-between gap-3">
+          {!isEditing && formHasDraftContent(form) ? (
+            <button
+              type="button"
+              onClick={handleDiscardDraft}
+              disabled={isSavingToStockpile}
+              className="px-3 py-2.5 text-sm font-medium transition-opacity hover:opacity-70 disabled:opacity-40"
+              style={{
+                backgroundColor: 'transparent',
+                color: theme?.textLight || theme?.text || '#6b7280',
+                border: 'none',
+              }}
+              title="Clear this draft and start a blank entry"
+            >
+              Discard draft
+            </button>
+          ) : (
+            <div />
+          )}
           <button 
             onClick={async () => { 
               try {
@@ -383,7 +468,7 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
           {!isEditing && onAddSupply && (
             <button
               type="button"
-              onClick={() => { onClose(); setTimeout(onAddSupply, 200); }}
+              onClick={() => { handleClose(); setTimeout(onAddSupply, 200); }}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all mb-1"
               style={{
                 backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
@@ -431,15 +516,19 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
               customShadow={theme.isDark ? 'inset 0 2px 4px rgba(0,0,0,0.3)' : 'inset 0 1px 2px rgba(0,0,0,0.1)'}
               outlined={true}
               customTextColor={theme.isDark ? null : "#181A18"}
-              prefix={(
+              prefix={form.name?.trim() ? (
                 <div ref={purposeIconAnchorRef}>
+                  {(() => {
+                    const purposeColor = getPurposeIconColor(form.purposeIcon);
+                    const TriggerIcon = getPurposeIconComponent(form.purposeIcon);
+                    return (
                   <button
                     type="button"
                     onClick={togglePurposeIconMenu}
                     className="flex items-center justify-center rounded-lg w-9 h-9 p-0 border-0 cursor-pointer outline-none transition-transform touch-manipulation active:scale-[0.94]"
                     style={{
-                      backgroundColor: theme.isDark ? `${theme.primary}20` : `${theme.primary}12`,
-                      color: theme.primary,
+                      backgroundColor: theme.isDark ? `${purposeColor}33` : `${purposeColor}14`,
+                      color: purposeColor,
                     }}
                     aria-expanded={purposeIconMenuOpen}
                     aria-haspopup="listbox"
@@ -447,14 +536,13 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
                     aria-label="Purpose icon menu"
                   >
                     <IconContext.Provider value={{ weight: 'duotone' }}>
-                      {(() => {
-                        const TriggerIcon = getPurposeIconComponent(form.purposeIcon);
-                        return <TriggerIcon size={20} weight={PURPOSE_ICON_WEIGHT} style={{ color: theme.primary }} aria-hidden />;
-                      })()}
+                      <TriggerIcon size={20} weight={PURPOSE_ICON_WEIGHT} style={{ color: purposeColor }} aria-hidden />
                     </IconContext.Provider>
                   </button>
+                    );
+                  })()}
                 </div>
-              )}
+              ) : null}
               suffix={(
                 <button
                   type="button"
@@ -924,7 +1012,14 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
           }}>
             <button
               type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
+              onClick={() => {
+                setShowAdvanced((prev) => {
+                  const next = !prev;
+                  // Count expands in Simple mode toward Advanced Mode nudge
+                  if (next && simpleMode) trackMoreOptionsClick();
+                  return next;
+                });
+              }}
               className="w-full p-3 flex items-center justify-between hover:opacity-80 transition-opacity"
             >
               <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
@@ -1091,7 +1186,7 @@ export default function AddToStockpileBottomSheet({ open, onClose, theme, onUpgr
             className="fixed overflow-y-auto rounded-2xl border shadow-2xl p-2"
             style={{
               top: purposeMenuPlacement.top,
-              right: purposeMenuPlacement.right,
+              left: purposeMenuPlacement.left,
               width: purposeMenuPlacement.width,
               maxHeight: 'min(52vh, 340px)',
               zIndex: 10100,

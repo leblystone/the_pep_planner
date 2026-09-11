@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Flashlight, RotateCcw, Image as ImageIcon, ScanSearch, Check } from 'lucide-react';
+import { Flashlight, RotateCcw, Image as ImageIcon, Check } from 'lucide-react';
 import Modal from './Modal';
 import { captureVideoFrame, recognizeLabelImage } from '../../utils/labelOCR';
 
@@ -46,17 +46,34 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('Camera is not available in this browser. Use “Upload photo” instead.');
+        throw new Error('Device not supported.');
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+      } catch (firstErr) {
+        // Rear cam / constraints often fail on desktop — retry with any camera
+        if (
+          firstErr?.name === 'NotFoundError' ||
+          firstErr?.name === 'OverconstrainedError' ||
+          /requested device not found/i.test(firstErr?.message || '')
+        ) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        } else {
+          throw firstErr;
+        }
+      }
       streamRef.current = stream;
 
       const video = videoRef.current;
@@ -72,12 +89,29 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
       setTorchSupported(!!caps?.torch);
     } catch (err) {
       console.error('Label scanner camera failed:', err);
-      const msg =
-        err?.name === 'NotAllowedError'
-          ? 'Camera permission denied. You can still use Upload photo (no live camera needed).'
-          : err?.message || 'Could not start the camera.';
-      setError(msg);
-      setStatus('Upload a photo of the label instead');
+      const permissionDenied =
+        err?.name === 'NotAllowedError' ||
+        err?.name === 'PermissionDeniedError' ||
+        /permission|not allowed|denied/i.test(err?.message || '');
+      const noDevice =
+        err?.name === 'NotFoundError' ||
+        err?.name === 'OverconstrainedError' ||
+        /requested device not found|no device/i.test(err?.message || '');
+
+      if (permissionDenied) {
+        setError('Allow camera access');
+        setStatus('');
+      } else if (noDevice) {
+        setError('Device not supported.');
+        setStatus('');
+      } else {
+        setError(
+          /requested device not found/i.test(err?.message || '')
+            ? 'Device not supported.'
+            : (err?.message || 'Device not supported.')
+        );
+        setStatus('');
+      }
     }
   }, [stopCamera]);
 
@@ -87,6 +121,7 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
       setPreview(null);
       setBusy(false);
       setError(null);
+      setStatus('Starting camera…');
       return undefined;
     }
     const timer = setTimeout(() => startCamera(), 120);
@@ -139,7 +174,8 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
   const handleCapture = async () => {
     if (busy) return;
     if (!videoRef.current?.srcObject) {
-      setError('Camera isn’t ready. Allow camera access, or use Upload photo.');
+      // Re-prompt browser/OS camera permission
+      await startCamera();
       return;
     }
     try {
@@ -197,7 +233,6 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
       onClose={handleClose}
       theme={theme}
       title="Scan Label"
-      titleExtra={<ScanSearch size={18} style={{ color: theme?.primary }} />}
       maxWidth="max-w-md"
       noPadding
     >
@@ -240,7 +275,7 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
                 aria-hidden
               />
             )}
-            {status && (
+            {(busy || (status && streamRef.current)) && (
               <div
                 className="absolute bottom-3 left-3 right-3 text-center text-xs font-medium px-2 py-1.5 rounded-lg pointer-events-none"
                 style={{ backgroundColor: 'rgba(0,0,0,0.55)', color: '#fff' }}
@@ -298,8 +333,14 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
         )}
 
         {error && (
-          <div
-            className="rounded-lg border px-3 py-2 text-sm"
+          <button
+            type="button"
+            onClick={() => {
+              if (/allow camera access/i.test(error) || /device not supported/i.test(error)) {
+                startCamera();
+              }
+            }}
+            className="rounded-lg border px-3 py-2 text-sm text-left w-full"
             style={{
               backgroundColor: theme?.isDark ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.06)',
               borderColor: theme?.isDark ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.25)',
@@ -307,14 +348,18 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
             }}
           >
             {error}
-          </div>
+            {/allow camera access/i.test(error) ? (
+              <span className="block text-[11px] mt-1 opacity-80 font-medium">
+                Tap to request permission again
+              </span>
+            ) : null}
+          </button>
         )}
 
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           className="hidden"
           onChange={handleFile}
         />
@@ -351,19 +396,6 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
               <ImageIcon size={16} />
               Upload photo
             </button>
-            <button
-              type="button"
-              onClick={handleClose}
-              disabled={busy}
-              className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold"
-              style={{
-                backgroundColor: theme?.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                color: theme?.textLight,
-                border: `1px solid ${theme?.border}`,
-              }}
-            >
-              <X size={16} />
-            </button>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -399,10 +431,6 @@ export default function VialScannerModal({ open, onClose, theme, onScan }) {
             </button>
           </div>
         )}
-
-        <p className="text-[11px] text-center" style={{ color: theme?.textLight }}>
-          Tap the camera to capture. Live preview needs camera permission; Upload photo works from your gallery without it.
-        </p>
       </div>
     </Modal>
   );
