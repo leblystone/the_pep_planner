@@ -179,7 +179,7 @@ export default function Goals() {
     orders = [],
     stockpile = [],
   } = useAppContext()
-  const [goals, setGoals] = useSyncedGoals()
+  const [goals = [], setGoals] = useSyncedGoals()
   const [showGoal, setShowGoal] = useState(false)
   const [editingGoal, setEditingGoal] = useState(null)
   const [templatePrefill, setTemplatePrefill] = useState(null)
@@ -213,17 +213,22 @@ export default function Goals() {
   const autoCompletedRef = useRef(new Set())
 
   const snapshot = useMemo(() => {
-    return buildGoalLiveSnapshot({
-      metrics,
-      protocols,
-      supplements,
-      reconItems,
-      orders,
-      stockpile,
-      taskCompletion: getTaskCompletion(),
-      protocolHistory: getProtocolHistory(),
-      labResults: getLabResults(),
-    })
+    try {
+      return buildGoalLiveSnapshot({
+        metrics: metrics || [],
+        protocols: protocols || [],
+        supplements: supplements || [],
+        reconItems: reconItems || [],
+        orders: orders || [],
+        stockpile: stockpile || [],
+        taskCompletion: getTaskCompletion(),
+        protocolHistory: getProtocolHistory(),
+        labResults: getLabResults(),
+      })
+    } catch (error) {
+      console.error('Error building goal snapshot:', error)
+      return {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metrics, protocols, supplements, reconItems, orders, stockpile, liveTick])
 
@@ -244,9 +249,10 @@ export default function Goals() {
   }, [])
 
   const organized = useMemo(() => {
-    const active = goals.filter(g => !g.completed && !g.heldByFreePlan && !g.deleted)
-    const held = goals.filter(g => !g.completed && g.heldByFreePlan && !g.deleted)
-    const completed = goals.filter(g => g.completed && !g.deleted)
+    const safeGoals = Array.isArray(goals) ? goals : []
+    const active = safeGoals.filter(g => g && !g.completed && !g.heldByFreePlan && !g.deleted)
+    const held = safeGoals.filter(g => g && !g.completed && g.heldByFreePlan && !g.deleted)
+    const completed = safeGoals.filter(g => g && g.completed && !g.deleted)
     return { active, held, completed }
   }, [goals])
 
@@ -389,8 +395,9 @@ export default function Goals() {
     }
   }, [handleAdd])
 
-  const allVisible = goals.filter(g => !g.deleted)
-  const completedCount = allVisible.filter(g => g.completed).length
+  const safeGoals = Array.isArray(goals) ? goals : []
+  const allVisible = safeGoals.filter(g => g && !g.deleted)
+  const completedCount = allVisible.filter(g => g && g.completed).length
   const total = allVisible.length || 1
   const pct = allVisible.length === 0 ? 0 : Math.round((completedCount / total) * 100)
   const hasAny = allVisible.length > 0
