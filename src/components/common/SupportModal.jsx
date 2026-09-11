@@ -91,10 +91,12 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     const [selectedImages, setSelectedImages] = useState([]); // Array of {file: File, preview: string}
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStatus, setSubmitStatus] = useState(null);
+    const [submitError, setSubmitError] = useState(null);
     // Live ticket list from inbox subscription (no separate fetch needed)
     const liveTickets = useMemo(() => inboxTickets ?? [], [inboxTickets]);
     const [showHistoryChat, setShowHistoryChat] = useState(false);
     const [showAdminMessage, setShowAdminMessage] = useState(false);
+    const [showPreviousTickets, setShowPreviousTickets] = useState(false);
 
     // When the open ticket is closed server-side, drop back to the hub (not a live DM).
     useEffect(() => {
@@ -232,14 +234,14 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     // Keep email in sync with logged-in user (read-only; always use account email)
     useEffect(() => {
         if (user?.email) {
-            setFormData(prev => ({ ...prev, email: user.email }));
+            setFormData(prev => ({ ...prev, email: user?.email || '' }));
         }
     }, [user?.email, open]);
 
     // Load user's previous tickets when modal opens — inbox subscription is primary; this is a one-time refresh fallback.
     useEffect(() => {
         if (!open || !user?.email) return;
-        getUserTickets(user.email).catch((error) => {
+        getUserTickets(user?.email || '').catch((error) => {
             console.error('❌ Failed to load user tickets:', error);
         });
     }, [open, user?.email]);
@@ -304,6 +306,17 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
         setOpenHelpKey(null);
         setShowAdminMessage(false);
         setShowHistoryChat(false);
+        setSubmitError(null);
+        setSubmitStatus(null);
+        // Clean up any preview URLs to prevent memory leaks
+        selectedImages.forEach(img => {
+            try {
+                URL.revokeObjectURL(img.preview);
+            } catch (e) {
+                // Ignore if already revoked
+            }
+        });
+        setSelectedImages([]);
         onClose();
     };
 
@@ -311,11 +324,21 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
         e.preventDefault();
         if (!formData.message.trim()) return;
 
+        // Defensive check: ensure user is logged in
+        if (!user?.email) {
+            setSubmitError('Please sign in to submit. Your session may have expired.');
+            setSubmitStatus('error');
+            return;
+        }
+
+        console.log('🚀 Starting submission...', { ticketType, userEmail: user?.email });
         setIsSubmitting(true);
         setSubmitStatus(null);
+        setSubmitError(null);
         
         try {
             console.log('📤 Creating support ticket...', {
+                ticketType,
                 userEmail: user?.email,
                 userId: user?.uid,
                 message: formData.message.trim(),
@@ -327,10 +350,15 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             const imageStoragePaths = [];
             if (ticketType === 'support' && selectedImages.length > 0 && user?.uid) {
                 try {
+                    // Double-check user.uid exists before upload (prevents crash if user object changes)
+                    if (!user?.uid) {
+                        throw new Error('User authentication lost. Please refresh and try again.');
+                    }
+                    
                     for (const imageData of selectedImages) {
                         const uploadResult = await uploadImageToStorage(
                             imageData.file, 
-                            user.uid, 
+                            user.uid, // Safe now - checked above
                             'support'
                         );
                         imageUrls.push(uploadResult.url);
@@ -346,7 +374,8 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             // Three separate flows: suggestion & bug = feedback only (Bugs/Feedback tab, "From the Team" if needed). Support = ticket (SupportChatModal).
             if (ticketType === 'suggestion' || ticketType === 'bug') {
                 // Submit as feedback only — no support ticket. Appears in admin Feedback & Bugs; reply via "From the Team" if warranted.
-                await submitFeedback({
+                console.log(`📝 Submitting ${ticketType} feedback...`);
+                const feedbackId = await submitFeedback({
                     type: ticketType,
                     message: formData.message.trim(),
                     userEmail: user?.email || 'anonymous',
@@ -355,7 +384,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                     url: window.location.href,
                     timestamp: new Date().toISOString()
                 });
-                console.log(`✅ ${ticketType === 'bug' ? 'Bug report' : 'Suggestion'} submitted to feedback`);
+                console.log(`✅ ${ticketType === 'bug' ? 'Bug report' : 'Suggestion'} submitted to feedback - ID:`, feedbackId);
             } else {
                 // Support only: create support ticket (open ticket → SupportChatModal)
                 const ticketId = await createSupportTicket({
@@ -389,20 +418,60 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                 window.dispatchEvent(new CustomEvent('tpp:support-inbox-changed'));
             }
             
+            // Show success confirmation
+            console.log('✅ Submission successful - showing success UI');
             setSubmitStatus('success');
             
             // Clean up preview URLs
-            selectedImages.forEach(img => URL.revokeObjectURL(img.preview));
+            selectedImages.forEach(img => {
+                try {
+                    URL.revokeObjectURL(img.preview);
+                } catch (e) {
+                    // Ignore if already revoked or invalid
+                }
+            });
             setFormData({ email: '', message: '' });
             setSelectedImages([]);
             
-            // Auto-close after 2 seconds
+            // Auto-close after 5 seconds (unconditional - user can dismiss earlier with "Done" button)
+            console.log('⏱️ Scheduling modal auto-close in 5 seconds');
             setTimeout(() => {
+                console.log('⏱️ Auto-closing modal after success confirmation');
                 setSubmitStatus(null);
                 handleClose();
-            }, 2000);
+            }, 5000);
         } catch (error) {
             console.error('❌ Error creating support ticket:', error);
+            console.error('❌ Error details:', {
+                message: error?.message,
+                code: error?.code,
+                stack: error?.stack?.substring(0, 200)
+            });
+            
+            // Extract meaningful error message
+            let errorMessage = 'Something went wrong. Please try again.';
+            
+            if (error?.message) {
+                // Check for specific error types
+                if (error.message.includes('permission') || error.message.includes('PERMISSION_DENIED')) {
+                    errorMessage = 'Permission error. Please ensure you are signed in and try again.';
+                } else if (error.message.includes('network') || error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Network error. Please check your connection and try again.';
+                } else if (error.message.includes('upload')) {
+                    errorMessage = 'Failed to upload images. Please try with smaller images or without attachments.';
+                } else if (error.message.includes('auth')) {
+                    errorMessage = 'Authentication error. Please sign out and sign in again.';
+                } else {
+                    // Use the actual error message for other cases
+                    errorMessage = error.message.length > 100 
+                        ? error.message.substring(0, 100) + '...' 
+                        : error.message;
+                }
+            } else if (error?.code) {
+                errorMessage = `Error: ${error.code}`;
+            }
+            
+            setSubmitError(errorMessage);
             setSubmitStatus('error');
         } finally {
             setIsSubmitting(false);
@@ -741,19 +810,36 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                 }}
                                             />
                                         ) : submitStatus === 'success' ? (
-                                            <div className="text-center py-10 px-2">
+                                            <div className="text-center py-10 px-4">
                                                 <div
-                                                    className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4"
-                                                    style={{ backgroundColor: (theme.success || '#16A34A') + '20' }}
+                                                    className="inline-flex items-center justify-center w-20 h-20 rounded-3xl mb-5"
+                                                    style={{ 
+                                                        backgroundColor: (theme.success || '#16A34A') + '20',
+                                                        boxShadow: `0 0 0 8px ${(theme.success || '#16A34A')}08`
+                                                    }}
                                                 >
-                                                    <CheckCircle className="w-8 h-8" style={{ color: theme.success || '#16A34A' }} />
+                                                    <CheckCircle className="w-10 h-10" weight="fill" style={{ color: theme.success || '#16A34A' }} />
                                                 </div>
-                                                <h3 className="text-xl font-semibold tracking-tight mb-2" style={{ color: theme.text }}>
-                                                    Message Sent!
+                                                <h3 className="text-2xl font-bold tracking-tight mb-3" style={{ color: theme.text }}>
+                                                    {ticketType === 'bug' ? 'Bug Report Sent!' : ticketType === 'suggestion' ? 'Suggestion Sent!' : 'Message Sent!'}
                                                 </h3>
-                                                <p className="text-sm opacity-60" style={{ color: theme.text }}>
-                                                    We&apos;ll get back to you as soon as possible.
+                                                <p className="text-sm opacity-70 mb-5 px-2" style={{ color: theme.text }}>
+                                                    {ticketType === 'bug' || ticketType === 'suggestion' 
+                                                        ? "Thanks for your feedback! We'll review it and may reach out via the 'From the Team' message." 
+                                                        : "We'll get back to you as soon as possible."}
                                                 </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSubmitStatus(null); handleClose(); }}
+                                                    className="px-6 py-2.5 rounded-2xl font-semibold transition-all active:scale-95"
+                                                    style={{
+                                                        backgroundColor: theme.primary,
+                                                        color: theme.textOnPrimary || '#fff',
+                                                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                                                    }}
+                                                >
+                                                    Done
+                                                </button>
                                             </div>
                                         ) : submitStatus === 'error' ? (
                                             <div className="text-center py-8 px-2">
@@ -764,14 +850,17 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                     <AlertCircle className="w-8 h-8" style={{ color: theme.error || '#DC2626' }} />
                                                 </div>
                                                 <h3 className="text-xl font-semibold tracking-tight mb-2" style={{ color: theme.text }}>
-                                                    Something went wrong
+                                                    Submission Failed
                                                 </h3>
-                                                <p className="text-sm opacity-60 mb-5" style={{ color: theme.text }}>
-                                                    Please try again or email us directly.
+                                                <p className="text-sm opacity-70 mb-4 px-4" style={{ color: theme.text }}>
+                                                    {submitError || 'Something went wrong. Please try again.'}
+                                                </p>
+                                                <p className="text-xs opacity-50 mb-5 px-4" style={{ color: theme.text }}>
+                                                    If this persists, email us at support@thepepplanner.com
                                                 </p>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setSubmitStatus(null)}
+                                                    onClick={() => { setSubmitStatus(null); setSubmitError(null); }}
                                                     className="px-5 py-2.5 rounded-2xl font-semibold transition-all active:scale-95"
                                                     style={{
                                                         backgroundColor: theme.primary,
