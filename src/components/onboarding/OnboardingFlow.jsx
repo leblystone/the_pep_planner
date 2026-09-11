@@ -68,12 +68,17 @@ export default function OnboardingFlow({ open, theme, userId, initialStep, initi
   const stepRef = useRef(step);
   stepRef.current = step;
 
+  // Re-sync step + mode whenever the flow opens. Parent may flip
+  // initialTrackingMode from a stale default to null after cloud hydrate —
+  // without this, Simple stays pre-selected from the first mount.
   useEffect(() => {
-    if (open && initialStep) {
-      setStep(initialStep);
-      setDirection(1);
-    }
-  }, [open, initialStep]);
+    if (!open) return;
+    setStep(initialStep || ONBOARDING_STEPS.SPLASH);
+    setTrackingMode(
+      initialTrackingMode ? normalizeTrackingMode(initialTrackingMode) : null
+    );
+    setDirection(1);
+  }, [open, initialStep, initialTrackingMode]);
 
   const persistState = useCallback(async (patch) => {
     if (!userId) return;

@@ -334,7 +334,9 @@ function App() {
 
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingResumeStep, setOnboardingResumeStep] = useState(ONBOARDING_STEPS.SPLASH);
-  const [onboardingTrackingMode, setOnboardingTrackingMode] = useState('simple');
+  // null until the user explicitly picks Simple/Advanced — never default to 'simple'
+  // or the chooser mounts pre-selected and looks "skipped".
+  const [onboardingTrackingMode, setOnboardingTrackingMode] = useState(null);
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   const [welcomeBackGap, setWelcomeBackGap] = useState(null);
   const [showTrialEndedModal, setShowTrialEndedModal] = useState(false);
@@ -527,10 +529,12 @@ function App() {
     window.testWelcomeModal = () => {
       console.log('🧪 Testing onboarding flow');
       setOnboardingResumeStep(ONBOARDING_STEPS.SPLASH);
+      setOnboardingTrackingMode(null);
       setShowOnboarding(true);
     };
     window.testOnboardingFlow = () => {
       setOnboardingResumeStep(ONBOARDING_STEPS.SPLASH);
+      setOnboardingTrackingMode(null);
       setShowOnboarding(true);
     };
     window.testFeatureAnnouncement = () => {
@@ -596,6 +600,7 @@ function App() {
           break;
         case 'onboarding':
           setOnboardingResumeStep(ONBOARDING_STEPS.SPLASH);
+          setOnboardingTrackingMode(null);
           setShowOnboarding(true);
           break;
         case 'page-loader':
@@ -621,10 +626,12 @@ function App() {
     // Force onboarding if query param is present
     if (searchParams.get('testWelcome') === 'true' || searchParams.get('testOnboarding') === 'true') {
       setOnboardingResumeStep(ONBOARDING_STEPS.SPLASH);
+      setOnboardingTrackingMode(null);
       setShowOnboarding(true);
     }
     if (searchParams.get('replayOnboarding') === 'true') {
       setOnboardingResumeStep(ONBOARDING_STEPS.SPLASH);
+      setOnboardingTrackingMode(null);
       setShowOnboarding(true);
     }
   }, [searchParams]);
@@ -633,6 +640,7 @@ function App() {
   useEffect(() => {
     const onReplay = () => {
       setOnboardingResumeStep(ONBOARDING_STEPS.SPLASH);
+      setOnboardingTrackingMode(null);
       setShowOnboarding(true);
     };
     window.addEventListener('tpp:replay-onboarding', onReplay);
@@ -679,25 +687,35 @@ function App() {
           return;
         }
 
-        const isFirebaseUser = localStorage.getItem('tpprover_auth_token') === 'firebase_token';
+        // Prefer live Firebase user over localStorage token — token can lag a tick after signup.
+        const isFirebaseUser =
+          Boolean(user?.uid) ||
+          localStorage.getItem('tpprover_auth_token') === 'firebase_token';
         const { loadUserState } = await import('./services/cloudStorage');
 
         if (user?.uid) {
           const userState = await loadUserState(user.uid);
           const hasOnboarded = userState?.hasOnboarded || false;
-          const sampleDataCleared = userState?.sampleDataCleared || false;
           const resumeStep = userState?.onboardingStep || ONBOARDING_STEPS.SPLASH;
-          const mode = normalizeTrackingMode(userState?.trackingMode);
+          // Only treat an explicit simple/advanced cloud value as a real chooser pick.
+          // Do NOT use normalizeTrackingMode() here — it coerces missing → 'simple'.
+          const rawMode = userState?.trackingMode;
+          const hasExplicitModeChoice =
+            rawMode === 'simple' ||
+            rawMode === 'advanced' ||
+            rawMode === 'single_focus' ||
+            rawMode === 'multi_protocol' ||
+            rawMode === 'guided';
+          const mode = hasExplicitModeChoice ? normalizeTrackingMode(rawMode) : null;
+          const pastChooserSteps = [
+            ONBOARDING_STEPS.FIRST_PROTOCOL,
+            ONBOARDING_STEPS.SETUP_CHECKLIST,
+            ONBOARDING_STEPS.TRIAL_PRICING,
+          ];
+          const hasSelectedMode =
+            hasExplicitModeChoice &&
+            (resumeStep === ONBOARDING_STEPS.DONE || pastChooserSteps.includes(resumeStep));
 
-          // Only restore trackingMode for users who have already selected it during onboarding
-          // (i.e., they've progressed past RESEARCHER_TYPE step). This prevents pre-selecting
-          // a mode for brand new users who haven't seen the chooser yet.
-          const hasSelectedMode = userState?.trackingMode && (
-            !resumeStep || 
-            resumeStep === ONBOARDING_STEPS.DONE ||
-            [ONBOARDING_STEPS.FIRST_PROTOCOL, ONBOARDING_STEPS.SETUP_CHECKLIST, ONBOARDING_STEPS.TRIAL_PRICING].includes(resumeStep)
-          );
-          
           if (hasSelectedMode) {
             setLocalTrackingMode(mode, { source: 'hydrate' });
             setOnboardingTrackingMode(mode);
@@ -738,19 +756,29 @@ function App() {
 
           sessionStorage.removeItem('tpp_welcome_shown');
 
-          if (!hasOnboarded && isFirebaseUser && !sampleDataCleared) {
-            console.log('✅ New user detected - showing onboarding flow', { resumeStep, accountAgeMs: Math.round(accountAgeMs / 1000) + 's', isNewAccount });
-            
-            // CRITICAL: For truly new accounts (< 15 min old), ALWAYS start from SPLASH
-            // to ensure they see the Simple vs Advanced chooser. Only resume from a saved
-            // step if the account is older (returning from another device/session).
-            const shouldResumeFromSavedStep = !isNewAccount && resumeStep && resumeStep !== ONBOARDING_STEPS.DONE && resumeStep !== ONBOARDING_STEPS.SPLASH;
-            
-            setOnboardingResumeStep(
-              shouldResumeFromSavedStep
-                ? resumeStep
-                : ONBOARDING_STEPS.SPLASH
-            );
+          // Do NOT gate on sampleDataCleared — clearing demo data is unrelated to first-run
+          // onboarding and previously caused new/returning-incomplete users to skip the chooser.
+          if (!hasOnboarded && isFirebaseUser) {
+            console.log('✅ New user detected - showing onboarding flow', { resumeStep, accountAgeMs: Math.round(accountAgeMs / 1000) + 's', isNewAccount, hasExplicitModeChoice });
+
+            // New accounts always start at SPLASH.
+            // Older accounts may resume mid-flow, but NEVER past the chooser without an
+            // explicit mode pick (clamp to RESEARCHER_TYPE instead).
+            let startStep = ONBOARDING_STEPS.SPLASH;
+            if (
+              !isNewAccount &&
+              resumeStep &&
+              resumeStep !== ONBOARDING_STEPS.DONE &&
+              resumeStep !== ONBOARDING_STEPS.SPLASH
+            ) {
+              if (pastChooserSteps.includes(resumeStep) && !hasExplicitModeChoice) {
+                startStep = ONBOARDING_STEPS.RESEARCHER_TYPE;
+              } else {
+                startStep = resumeStep;
+              }
+            }
+
+            setOnboardingResumeStep(startStep);
             setShowOnboarding(true);
           }
         }
@@ -1054,6 +1082,7 @@ function App() {
         onSupportClick={() => setShowSupportModal(true)}
       />
       <OnboardingFlow
+        key={showOnboarding ? `onboarding-${user?.uid || 'anon'}-${onboardingResumeStep}` : 'onboarding-closed'}
         open={showOnboarding}
         theme={theme}
         userId={user?.uid}
