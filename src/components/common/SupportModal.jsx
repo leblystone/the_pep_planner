@@ -234,14 +234,14 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     // Keep email in sync with logged-in user (read-only; always use account email)
     useEffect(() => {
         if (user?.email) {
-            setFormData(prev => ({ ...prev, email: user.email }));
+            setFormData(prev => ({ ...prev, email: user?.email || '' }));
         }
     }, [user?.email, open]);
 
     // Load user's previous tickets when modal opens — inbox subscription is primary; this is a one-time refresh fallback.
     useEffect(() => {
         if (!open || !user?.email) return;
-        getUserTickets(user.email).catch((error) => {
+        getUserTickets(user?.email || '').catch((error) => {
             console.error('❌ Failed to load user tickets:', error);
         });
     }, [open, user?.email]);
@@ -350,10 +350,15 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             const imageStoragePaths = [];
             if (ticketType === 'support' && selectedImages.length > 0 && user?.uid) {
                 try {
+                    // Double-check user.uid exists before upload (prevents crash if user object changes)
+                    if (!user?.uid) {
+                        throw new Error('User authentication lost. Please refresh and try again.');
+                    }
+                    
                     for (const imageData of selectedImages) {
                         const uploadResult = await uploadImageToStorage(
                             imageData.file, 
-                            user.uid, 
+                            user.uid, // Safe now - checked above
                             'support'
                         );
                         imageUrls.push(uploadResult.url);
@@ -428,13 +433,15 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             setFormData({ email: '', message: '' });
             setSelectedImages([]);
             
-            // Auto-close after 3 seconds to show success confirmation
-            console.log('⏱️ Scheduling modal close in 3 seconds');
+            // Auto-close after 5 seconds, but user can dismiss earlier with "Done" button
+            console.log('⏱️ Scheduling modal auto-close in 5 seconds');
             setTimeout(() => {
                 console.log('⏱️ Auto-closing modal after success confirmation');
-                setSubmitStatus(null);
-                handleClose();
-            }, 3000);
+                if (submitStatus === 'success') {
+                    setSubmitStatus(null);
+                    handleClose();
+                }
+            }, 5000);
         } catch (error) {
             console.error('❌ Error creating support ticket:', error);
             console.error('❌ Error details:', {
@@ -805,19 +812,36 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                 }}
                                             />
                                         ) : submitStatus === 'success' ? (
-                                            <div className="text-center py-10 px-2">
+                                            <div className="text-center py-10 px-4">
                                                 <div
-                                                    className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4"
-                                                    style={{ backgroundColor: (theme.success || '#16A34A') + '20' }}
+                                                    className="inline-flex items-center justify-center w-20 h-20 rounded-3xl mb-5"
+                                                    style={{ 
+                                                        backgroundColor: (theme.success || '#16A34A') + '20',
+                                                        boxShadow: `0 0 0 8px ${(theme.success || '#16A34A')}08`
+                                                    }}
                                                 >
-                                                    <CheckCircle className="w-8 h-8" style={{ color: theme.success || '#16A34A' }} />
+                                                    <CheckCircle className="w-10 h-10" weight="fill" style={{ color: theme.success || '#16A34A' }} />
                                                 </div>
-                                                <h3 className="text-xl font-semibold tracking-tight mb-2" style={{ color: theme.text }}>
-                                                    Message Sent!
+                                                <h3 className="text-2xl font-bold tracking-tight mb-3" style={{ color: theme.text }}>
+                                                    {ticketType === 'bug' ? 'Bug Report Sent!' : ticketType === 'suggestion' ? 'Suggestion Sent!' : 'Message Sent!'}
                                                 </h3>
-                                                <p className="text-sm opacity-60" style={{ color: theme.text }}>
-                                                    We&apos;ll get back to you as soon as possible.
+                                                <p className="text-sm opacity-70 mb-5 px-2" style={{ color: theme.text }}>
+                                                    {ticketType === 'bug' || ticketType === 'suggestion' 
+                                                        ? "Thanks for your feedback! We'll review it and may reach out via the 'From the Team' message." 
+                                                        : "We'll get back to you as soon as possible."}
                                                 </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSubmitStatus(null); handleClose(); }}
+                                                    className="px-6 py-2.5 rounded-2xl font-semibold transition-all active:scale-95"
+                                                    style={{
+                                                        backgroundColor: theme.primary,
+                                                        color: theme.textOnPrimary || '#fff',
+                                                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                                                    }}
+                                                >
+                                                    Done
+                                                </button>
                                             </div>
                                         ) : submitStatus === 'error' ? (
                                             <div className="text-center py-8 px-2">
