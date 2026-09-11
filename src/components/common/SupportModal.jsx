@@ -91,6 +91,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     const [selectedImages, setSelectedImages] = useState([]); // Array of {file: File, preview: string}
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStatus, setSubmitStatus] = useState(null);
+    const [submitError, setSubmitError] = useState(null);
     // Live ticket list from inbox subscription (no separate fetch needed)
     const liveTickets = useMemo(() => inboxTickets ?? [], [inboxTickets]);
     const [showHistoryChat, setShowHistoryChat] = useState(false);
@@ -305,6 +306,17 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
         setOpenHelpKey(null);
         setShowAdminMessage(false);
         setShowHistoryChat(false);
+        setSubmitError(null);
+        setSubmitStatus(null);
+        // Clean up any preview URLs to prevent memory leaks
+        selectedImages.forEach(img => {
+            try {
+                URL.revokeObjectURL(img.preview);
+            } catch (e) {
+                // Ignore if already revoked
+            }
+        });
+        setSelectedImages([]);
         onClose();
     };
 
@@ -312,8 +324,16 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
         e.preventDefault();
         if (!formData.message.trim()) return;
 
+        // Defensive check: ensure user is logged in
+        if (!user?.email) {
+            setSubmitError('Please sign in to submit. Your session may have expired.');
+            setSubmitStatus('error');
+            return;
+        }
+
         setIsSubmitting(true);
         setSubmitStatus(null);
+        setSubmitError(null);
         
         try {
             console.log('📤 Creating support ticket...', {
@@ -393,7 +413,13 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             setSubmitStatus('success');
             
             // Clean up preview URLs
-            selectedImages.forEach(img => URL.revokeObjectURL(img.preview));
+            selectedImages.forEach(img => {
+                try {
+                    URL.revokeObjectURL(img.preview);
+                } catch (e) {
+                    // Ignore if already revoked or invalid
+                }
+            });
             setFormData({ email: '', message: '' });
             setSelectedImages([]);
             
@@ -404,6 +430,31 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
             }, 2000);
         } catch (error) {
             console.error('❌ Error creating support ticket:', error);
+            
+            // Extract meaningful error message
+            let errorMessage = 'Something went wrong. Please try again.';
+            
+            if (error?.message) {
+                // Check for specific error types
+                if (error.message.includes('permission') || error.message.includes('PERMISSION_DENIED')) {
+                    errorMessage = 'Permission error. Please ensure you are signed in and try again.';
+                } else if (error.message.includes('network') || error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Network error. Please check your connection and try again.';
+                } else if (error.message.includes('upload')) {
+                    errorMessage = 'Failed to upload images. Please try with smaller images or without attachments.';
+                } else if (error.message.includes('auth')) {
+                    errorMessage = 'Authentication error. Please sign out and sign in again.';
+                } else {
+                    // Use the actual error message for other cases
+                    errorMessage = error.message.length > 100 
+                        ? error.message.substring(0, 100) + '...' 
+                        : error.message;
+                }
+            } else if (error?.code) {
+                errorMessage = `Error: ${error.code}`;
+            }
+            
+            setSubmitError(errorMessage);
             setSubmitStatus('error');
         } finally {
             setIsSubmitting(false);
@@ -765,14 +816,17 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
                                                     <AlertCircle className="w-8 h-8" style={{ color: theme.error || '#DC2626' }} />
                                                 </div>
                                                 <h3 className="text-xl font-semibold tracking-tight mb-2" style={{ color: theme.text }}>
-                                                    Something went wrong
+                                                    Submission Failed
                                                 </h3>
-                                                <p className="text-sm opacity-60 mb-5" style={{ color: theme.text }}>
-                                                    Please try again or email us directly.
+                                                <p className="text-sm opacity-70 mb-4 px-4" style={{ color: theme.text }}>
+                                                    {submitError || 'Something went wrong. Please try again.'}
+                                                </p>
+                                                <p className="text-xs opacity-50 mb-5 px-4" style={{ color: theme.text }}>
+                                                    If this persists, email us at support@thepepplanner.com
                                                 </p>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setSubmitStatus(null)}
+                                                    onClick={() => { setSubmitStatus(null); setSubmitError(null); }}
                                                     className="px-5 py-2.5 rounded-2xl font-semibold transition-all active:scale-95"
                                                     style={{
                                                         backgroundColor: theme.primary,
