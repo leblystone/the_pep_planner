@@ -45,8 +45,7 @@ class ChunkErrorBoundary extends React.Component {
   }
 
   handleReload = () => {
-    // Navigate to dashboard instead of reloading
-    window.location.href = '/app/dashboard';
+    window.location.reload();
   };
 
   handleOpenSupport = () => {
