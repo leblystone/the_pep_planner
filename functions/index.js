@@ -1986,6 +1986,7 @@ exports.dailyGooglePlayReconciliation = onSchedule({
   timeZone: 'UTC',
   memory: '1GiB',
   timeoutSeconds: 540,
+  secrets: ['GOOGLE_PLAY_SERVICE_ACCOUNT_KEY'],
 }, async () => {
   logger.info('🔄 Running daily Google Play/Firestore reconciliation...');
   const db = admin.firestore();

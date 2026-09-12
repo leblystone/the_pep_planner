@@ -158,7 +158,7 @@ exports.googlePlayWebhook = onRequest(
   {
     cors: true,
     invoker: 'public',
-    secrets: ['RESEND_API_KEY']
+    secrets: ['GOOGLE_PLAY_SERVICE_ACCOUNT_KEY', 'RESEND_API_KEY']
   },
   async (request, response) => {
     logger.info('📥 Received Google Play RTDN notification');
