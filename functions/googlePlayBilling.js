@@ -219,26 +219,29 @@ function mapPurchaseToSubscription(verifiedPurchase, productId, options = {}) {
 
   // Determine plan details from product ID — both m. and com. prefixes accepted
   const planMapping = {
-    'm.thepepplanner.app.researchmonthly':    { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month'    },
-    'm.thepepplanner.app.researchannual':     { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year'     },
-    'm.thepepplanner.app.researchlifetime':   { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime' },
-    'com.thepepplanner.app.researchmonthly':  { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month'    },
-    'com.thepepplanner.app.researchannual':   { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year'     },
-    'com.thepepplanner.app.researchlifetime': { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime' },
+    'm.thepepplanner.app.researchmonthly':    { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month',    tier: 'research_plus' },
+    'm.thepepplanner.app.researchannual':     { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year',     tier: 'research_plus' },
+    'm.thepepplanner.app.researchlifetime':   { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime', tier: 'research_plus' },
+    'com.thepepplanner.app.researchmonthly':  { key: 'researchPlusMonthly',  name: 'Research+ Monthly',  interval: 'month',    tier: 'research_plus' },
+    'com.thepepplanner.app.researchannual':   { key: 'researchPlusAnnual',   name: 'Research+ Annual',   interval: 'year',     tier: 'research_plus' },
+    'com.thepepplanner.app.researchlifetime': { key: 'researchPlusLifetime', name: 'Research+ Lifetime', interval: 'lifetime', tier: 'research_plus' },
   };
 
   const planDetails = planMapping[productId] || {
     key: productId,
     name: productId,
     interval: purchaseType === 'product' ? 'lifetime' : 'month',
+    tier: null,
   };
 
   const subscriptionData = {
     userId,
     status: 'active',
     plan: planDetails.name,
+    planKey: planDetails.key,
+    ...(planDetails.tier && { tier: planDetails.tier }),
     interval: planDetails.interval,
-    paymentProvider: 'googleplay',
+    paymentProvider: 'google_play',
     googlePlayProductId: productId,
     googlePlayPurchaseToken: data.purchaseToken || options.purchaseToken,
     googlePlayOrderId: data.orderId || options.orderId,
@@ -276,7 +279,7 @@ function mapPurchaseToSubscription(verifiedPurchase, productId, options = {}) {
 exports.verifyGooglePlayPurchase = onCall(
   {
     cors: true,
-    secrets: ['GOOGLE_PLAY_LICENSE_KEY', 'RESEND_API_KEY'],
+    secrets: ['GOOGLE_PLAY_SERVICE_ACCOUNT_KEY', 'GOOGLE_PLAY_LICENSE_KEY', 'RESEND_API_KEY'],
   },
   async (request) => {
     if (!request.auth) {

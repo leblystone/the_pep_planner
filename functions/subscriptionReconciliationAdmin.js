@@ -93,6 +93,7 @@ async function syncSingleUser(db, platform, userId, logContext) {
 }
 
 const APPLE_API_SECRETS = [
+  'GOOGLE_PLAY_SERVICE_ACCOUNT_KEY',
   'APPLE_APP_STORE_KEY_ID',
   'APPLE_APP_STORE_ISSUER_ID',
   'APPLE_APP_STORE_PRIVATE_KEY',
