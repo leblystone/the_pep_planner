@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
-import { ChevronUp, ChevronDown, Flame, HelpCircle } from 'lucide-react';
+import { ChevronUp, ChevronDown, HelpCircle } from 'lucide-react';
 import { ListChecks } from '@phosphor-icons/react';
 import {
   Drop,
@@ -8,6 +8,7 @@ import {
   TrendUp,
   TrendDown,
   Check,
+  Fire,
 } from '@phosphor-icons/react';
 import SideEffectsQuickSheet from '../components/sideeffects/SideEffectsQuickSheet';
 import ProtocolNotesSheet from '../components/sideeffects/ProtocolNotesSheet';
@@ -129,6 +130,7 @@ export default function CustomizableDashboard() {
     setMetrics,
     oneOffDoses,
     medications,
+    updateProtocol,
   } = useAppContext();
 
   const activeProtocols = (protocols || []).filter(p => p.active !== false);
@@ -142,6 +144,21 @@ export default function CustomizableDashboard() {
     }),
     [protocols]
   );
+
+  const handleRemoveAsNeeded = React.useCallback((protocol) => {
+    if (!protocol?.id || !updateProtocol) return;
+    const name = protocol?.peptides?.[0]?.name || protocol?.name || 'Protocol';
+    if (!window.confirm(`Remove "${name}" from As Needed? This ends the protocol.`)) return;
+    updateProtocol({
+      ...protocol,
+      active: false,
+      endDate: getLocalDateString(),
+      endType: 'manual',
+    });
+    window.dispatchEvent(new CustomEvent('tpp:toast', {
+      detail: { message: `${name} removed from As Needed.`, type: 'success' },
+    }));
+  }, [updateProtocol]);
 
   // Dashboard customization state
   const [widgets, setWidgets] = useState(() => ensureProtocolsCardWidget(loadDashboardLayout()));
@@ -1249,6 +1266,7 @@ export default function CustomizableDashboard() {
                 onNewOrder={openBlankNewOrder}
                 asNeededProtocols={asNeededProtocols}
                 onLogAsNeeded={(protocol) => { setLogOneOffPrefill(protocol); setShowLogOneOffDose(true); }}
+                onRemoveAsNeeded={handleRemoveAsNeeded}
                 onAddBuy={() => { setEditingScheduledBuy(null); setShowAddBuyModal(true); }}
                 onOpenBuy={(buy) => { setEditingScheduledBuy({ ...buy, item: buy.item || buy.name || buy.peptideName }); setShowAddBuyModal(true); }}
                 wishlist={wishlist}
@@ -1392,6 +1410,7 @@ export default function CustomizableDashboard() {
                       onNewOrder={openBlankNewOrder}
                       asNeededProtocols={asNeededProtocols}
                       onLogAsNeeded={(protocol) => { setLogOneOffPrefill(protocol); setShowLogOneOffDose(true); }}
+                      onRemoveAsNeeded={handleRemoveAsNeeded}
                       onAddBuy={() => { setEditingScheduledBuy(null); setShowAddBuyModal(true); }}
                       onOpenBuy={(buy) => { setEditingScheduledBuy({ ...buy, item: buy.item || buy.name || buy.peptideName }); setShowAddBuyModal(true); }}
                       wishlist={wishlist}
@@ -1464,16 +1483,9 @@ export default function CustomizableDashboard() {
                     <span className="text-sm font-semibold uppercase tracking-wide" style={{ color: theme.textLight }}>Water</span>
                     <Drop size={18} weight="duotone" color={WATER_CARD_BLUE} aria-hidden />
                   </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    {hydrationStreakN > 0 && (
-                      <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full" style={{ backgroundColor: theme.primary + '22', color: theme.primary }}>
-                        <Flame size={13} weight="fill" />{hydrationStreakN}d
-                      </span>
-                    )}
-                    <span className="text-base font-bold tabular-nums leading-tight" style={{ color: WATER_CARD_BLUE }}>
-                      {todayWaterAmt}<span className="text-sm font-semibold" style={{ color: theme.textLight }}>/{todayWater.goal || hydrationPrefs.dailyGoal} {hydrationPrefs.unit}</span>
-                    </span>
-                  </div>
+                  <span className="text-base font-bold tabular-nums leading-tight flex-shrink-0" style={{ color: WATER_CARD_BLUE }}>
+                    {todayWaterAmt}<span className="text-sm font-semibold" style={{ color: theme.textLight }}>/{todayWater.goal || hydrationPrefs.dailyGoal} {hydrationPrefs.unit}</span>
+                  </span>
                 </div>
                 <div className="flex-1 flex items-center">
                   <div className="flex items-center gap-1.5 w-full">
@@ -1493,6 +1505,20 @@ export default function CustomizableDashboard() {
                     >+</button>
                   </div>
                 </div>
+                {hydrationStreakN > 0 && (
+                  <div className="flex justify-center pt-1">
+                    <span
+                      className="flex items-center gap-1.5 text-[12px] font-bold px-2.5 py-1.5 rounded-full"
+                      style={{
+                        backgroundColor: (theme.primaryDark || theme.primary) + '28',
+                        color: theme.primaryDark || theme.text,
+                      }}
+                    >
+                      <Fire size={16} weight="duotone" aria-hidden />
+                      {hydrationStreakN}d
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1567,10 +1593,10 @@ export default function CustomizableDashboard() {
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-semibold uppercase tracking-wide" style={{ color: theme.textLight }}>Weight</span>
-                        <Scales size={18} weight="duotone" color={theme.primary} aria-hidden />
+                        <Scales size={22} weight="duotone" color={theme.primary} aria-hidden />
                       </div>
                       {lastWeight?.date && (
-                        <span className="text-[10px]" style={{ color: theme.textLight }}>
+                        <span className="text-xs" style={{ color: theme.textLight }}>
                           {new Date(lastWeight.date.length === 10 ? lastWeight.date + 'T00:00:00' : lastWeight.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       )}
@@ -1603,7 +1629,7 @@ export default function CustomizableDashboard() {
                         className="min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums outline-none w-full"
                         style={{ color: theme.text }}
                       />
-                      <span className="text-[11px] font-semibold flex-shrink-0 self-baseline" style={{ color: theme.primary, opacity: 0.85 }}>{unit}</span>
+                      <span className="text-xl font-bold flex-shrink-0 self-center" style={{ color: theme.primary, opacity: 0.85 }}>{unit}</span>
                       {isDirty && (
                         <button
                           type="button"

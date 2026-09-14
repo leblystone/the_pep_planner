@@ -62,7 +62,7 @@ export default function DoseStatusChip({ label, explanation, theme }) {
       <button
         ref={triggerRef}
         type="button"
-        className="px-1.5 py-0.5 rounded-md text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 whitespace-nowrap cursor-pointer touch-manipulation"
+        className="px-2 py-0.5 rounded-md text-[10px] sm:text-xs font-semibold uppercase tracking-wide flex-shrink-0 whitespace-nowrap cursor-pointer touch-manipulation"
         style={{
           backgroundColor: bg,
           color,

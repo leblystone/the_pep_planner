@@ -1,10 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { CreditCard, Truck, HouseLine, Package, ArrowCounterClockwise } from '@phosphor-icons/react'
+import { CreditCard, Truck, HouseLine, Package } from '@phosphor-icons/react'
 import imgPlaced    from '../../assets/placed.png'
 import imgInTransit from '../../assets/in_transit.png'
 import imgDelivered from '../../assets/delivered.png'
-
-const IS_DEV = import.meta.env.DEV
 
 export function getOrderStatusStep(status) {
   const s = (status || '').toLowerCase()
@@ -149,6 +147,13 @@ const STEPS_META = [
   { key: 'delivered', label: 'Delivered',    Icon: Package,    burstVariant: 'star', burstColor: '#10b981', img: imgDelivered },
 ]
 
+/** Status illustrations for dashboard card overlay (index = step - 1) */
+export const ORDER_STATUS_ILLUSTRATIONS = STEPS_META.map((s) => ({
+  key: s.key,
+  label: s.label,
+  img: s.img,
+}))
+
 // ─── Vertical two-column layout ───────────────────────────────────────────────
 
 export default function OrderStatusProgress({
@@ -161,6 +166,8 @@ export default function OrderStatusProgress({
   deliveredDate,
   orderName,
   vendor,
+  /** When false, only the timeline renders — illustration lives on the parent card */
+  showIllustration = true,
 }) {
   useEffect(() => { if (animate || vertical) injectAnimStyles() }, [])  // eslint-disable-line
 
@@ -227,12 +234,12 @@ export default function OrderStatusProgress({
   const activeMeta = STEPS_META[step - 1] || STEPS_META[0]
 
   return (
-    <div ref={rootRef} className="relative py-1" aria-label="Order status progress">
-      {/* Two-panel: timeline left, illustration right */}
-      <div className="flex items-center justify-center gap-4">
+    <div ref={rootRef} className="relative pt-0 pb-0 w-full" aria-label="Order status progress">
+      {/* Timeline (+ optional embedded illustration) */}
+      <div className={`relative flex items-end gap-4 w-full ${showIllustration ? 'justify-between' : 'justify-start'}`}>
 
         {/* ── Timeline column ── */}
-        <div className="flex flex-col flex-1 min-w-0 justify-center">
+        <div className={`flex flex-col min-w-0 justify-start ${showIllustration ? 'flex-1' : 'w-full max-w-[200px]'}`}>
           {STEPS_META.map((st, idx) => {
             const n        = idx + 1
             const complete = step >= n
@@ -258,8 +265,8 @@ export default function OrderStatusProgress({
                 }}
               >
                 {/* Dot + connector */}
-                <div className="flex flex-col items-center flex-shrink-0" style={{ width: 38 }}>
-                  <div className="relative flex items-center justify-center" style={{ width: 34, height: 34 }}>
+                <div className="flex flex-col items-center flex-shrink-0" style={{ width: 48 }}>
+                  <div className="relative flex items-center justify-center" style={{ width: 44, height: 44 }}>
                     {active && animate && revealed && (
                       <span
                         style={{
@@ -272,15 +279,15 @@ export default function OrderStatusProgress({
                     <div
                       className="flex items-center justify-center rounded-full border-2"
                       style={{
-                        width: active ? 32 : 28, height: active ? 32 : 28,
+                        width: active ? 40 : 36, height: active ? 40 : 36,
                         borderColor: nodeColor, backgroundColor: nodeBg,
                         transition: 'all 0.3s ease', zIndex: 1,
                       }}
                     >
                       <StepIcon
-                        size={active ? 16 : 13}
-                        weight={complete ? 'fill' : 'regular'}
-                        style={{ color: complete ? fillColor : muted, opacity: complete ? 1 : 0.38, transition: 'all 0.3s ease' }}
+                        size={active ? 22 : 18}
+                        weight="duotone"
+                        style={{ color: complete ? fillColor : muted, opacity: complete ? 1 : 0.45, transition: 'all 0.3s ease' }}
                         aria-hidden
                       />
                     </div>
@@ -290,7 +297,7 @@ export default function OrderStatusProgress({
                   </div>
 
                   {!isLast && (
-                    <div style={{ width: 2, flex: 1, minHeight: 24, backgroundColor: lineColor, borderRadius: 2, position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ width: 2, flex: 1, minHeight: 28, backgroundColor: lineColor, borderRadius: 2, position: 'relative', overflow: 'hidden' }}>
                       {complete && (
                         <div style={{
                           position: 'absolute', inset: 0, backgroundColor: fillColor, opacity: 0.8,
@@ -316,25 +323,25 @@ export default function OrderStatusProgress({
                 </div>
 
                 {/* Text */}
-                <div className="flex-1 flex flex-col justify-start" style={{ paddingLeft: 8, paddingBottom: isLast ? 0 : 14, paddingTop: 4 }}>
+                <div className="flex-1 flex flex-col justify-start min-w-0" style={{ paddingLeft: 10, paddingBottom: isLast ? 0 : 16, paddingTop: 6 }}>
                   <span style={{
-                    fontSize: 12, fontWeight: active ? 700 : complete ? 600 : 500,
-                    color: complete ? textColor : muted, opacity: complete ? 1 : 0.45, lineHeight: 1.2,
+                    fontSize: 13, fontWeight: active ? 700 : complete ? 600 : 500,
+                    color: complete ? textColor : muted, opacity: complete ? 1 : 0.55, lineHeight: 1.25,
                   }}>
                     {st.label}
                   </span>
                   {stepDates[idx] && (
-                    <span style={{ fontSize: 10, marginTop: 2, color: muted, opacity: 0.72 }}>
+                    <span style={{ fontSize: 11, marginTop: 2, color: muted, opacity: 0.8 }}>
                       {stepDates[idx]}
                     </span>
                   )}
                   {active && !stepDates[idx] && (
-                    <span style={{ fontSize: 10, marginTop: 2, color: fillColor, opacity: 0.8, fontWeight: 600 }}>
+                    <span style={{ fontSize: 11, marginTop: 2, color: fillColor, opacity: 0.85, fontWeight: 600 }}>
                       {idx === 1 ? 'En route' : 'Processing…'}
                     </span>
                   )}
                   {active && isDelayed && (
-                    <span style={{ fontSize: 10, marginTop: 2, fontWeight: 600, color: theme?.isDark ? '#fca5a5' : '#dc2626' }}>
+                    <span style={{ fontSize: 11, marginTop: 2, fontWeight: 600, color: theme?.isDark ? '#fca5a5' : '#dc2626' }}>
                       Delayed
                     </span>
                   )}
@@ -344,72 +351,61 @@ export default function OrderStatusProgress({
           })}
         </div>
 
-        {/* ── Right column: order details + illustration ── */}
-        <div
-          className="flex-shrink-0 flex flex-col items-center justify-center gap-2"
-          style={{ width: 120 }}
-        >
-          {/* Order name + vendor */}
-          {orderName && (
-            <div className="w-full text-center" style={{
-              opacity:    revealed ? 1 : 0,
-              transform:  revealed ? 'translateY(0)' : 'translateY(5px)',
-              transition: 'opacity 0.4s ease 0.15s, transform 0.4s ease 0.15s',
-            }}>
-              <div
-                className="text-[12px] font-bold leading-tight"
-                style={{ color: theme?.isDark ? 'rgba(200,215,195,0.95)' : theme?.primary }}
-              >
-                {orderName}
-              </div>
-              {vendor && (
-                <div className="text-[10px] mt-0.5" style={{ color: muted, opacity: 0.8 }}>
-                  {vendor}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Illustration */}
-          <img
-            src={activeMeta.img}
-            alt={activeMeta.label}
+        {/* ── Optional embedded illustration (Orders list / non-card contexts) ── */}
+        {showIllustration && (
+        <div className="flex-1 min-w-0 flex items-end justify-center self-end">
+          <div
+            className="relative mx-auto"
             style={{
-              width:        112,
-              height:       112,
-              objectFit:    'contain',
-              flexShrink:   0,
-              opacity:      revealed ? 1 : 0,
-              transform:    revealed ? 'scale(1) translateY(0)' : 'scale(0.75) translateY(8px)',
-              transition:   'opacity 0.5s ease 0.3s, transform 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.3s',
-              mixBlendMode: 'screen',
+              width: 168,
+              height: 168,
+              marginBottom: -12,
+              opacity: revealed ? 1 : 0,
+              transform: revealed ? 'scale(1) translateY(0)' : 'scale(0.75) translateY(8px)',
+              transition: 'opacity 0.5s ease 0.25s, transform 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.25s',
             }}
-          />
+          >
+            {(orderName || vendor) && (
+              <div
+                className="absolute top-0 left-0 right-0 z-10 px-1.5 pt-1.5 text-center pointer-events-none"
+                style={{
+                  background: `linear-gradient(to bottom, ${
+                    theme?.isDark ? 'rgba(20,28,22,0.78)' : 'rgba(255,255,255,0.92)'
+                  } 50%, transparent)`,
+                  paddingBottom: 28,
+                }}
+              >
+                {orderName && (
+                  <div
+                    className="text-[13px] font-bold leading-snug"
+                    style={{ color: theme?.isDark ? 'rgba(200,215,195,0.98)' : theme?.primary }}
+                  >
+                    {orderName}
+                  </div>
+                )}
+                {vendor && (
+                  <div className="text-[11px] mt-1" style={{ color: muted, opacity: 0.9 }}>
+                    {vendor}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <img
+              src={activeMeta.img}
+              alt={activeMeta.label}
+              className="block w-full h-full"
+              style={{
+                objectFit: 'contain',
+                objectPosition: 'center bottom',
+                paddingTop: 36,
+              }}
+            />
+          </div>
         </div>
+        )}
 
       </div>
-
-      {/* DEV-only replay button */}
-      {IS_DEV && animate && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            hasPlayedRef.current = false
-            setPlayCount(c => c + 1)
-          }}
-          className="absolute bottom-0 right-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider opacity-50 hover:opacity-100 transition-opacity"
-          style={{
-            background: theme?.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
-            color:      fillColor,
-            zIndex:     30,
-          }}
-          title="Replay animation (dev only)"
-        >
-          <ArrowCounterClockwise size={10} weight="bold" />
-          replay
-        </button>
-      )}
     </div>
   )
 }

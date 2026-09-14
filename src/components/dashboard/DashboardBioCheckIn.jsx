@@ -267,7 +267,7 @@ export default function DashboardBioCheckIn({ theme, metrics, onCommit, isReadOn
                 {stepDef.title}
               </span>
               <span
-                className="text-[10px] font-medium leading-snug"
+                className="text-xs font-medium leading-snug whitespace-nowrap"
                 style={{
                   color: theme.isDark ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.62)',
                 }}
@@ -299,7 +299,7 @@ export default function DashboardBioCheckIn({ theme, metrics, onCommit, isReadOn
                   key={option.value}
                   type="button"
                   onClick={() => pickRating(stepDef.key, option.value)}
-                  className="flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2 rounded-lg text-[10px] font-semibold transition-[color,background-color,box-shadow,border-color] touch-manipulation min-h-[48px] border"
+                  className="flex-1 flex flex-col items-center justify-center gap-1 px-1 py-2.5 rounded-lg text-sm font-semibold transition-[color,background-color,box-shadow,border-color] touch-manipulation min-h-[60px] border"
                   style={
                     sel
                       ? {
@@ -316,7 +316,7 @@ export default function DashboardBioCheckIn({ theme, metrics, onCommit, isReadOn
                         }
                   }
                 >
-                  <IconComponent size={16} weight="duotone" />
+                  <IconComponent size={26} weight="duotone" />
                   <span>{option.label}</span>
                 </button>
               );

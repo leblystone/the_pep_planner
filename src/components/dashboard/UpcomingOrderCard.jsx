@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { Truck, MapPin, ArrowsClockwise } from '@phosphor-icons/react'
+import { Truck, MapPin, ArrowsClockwise, CreditCard, Package } from '@phosphor-icons/react'
 import { useNavigate } from 'react-router-dom'
 import { getCachedTrackingInfo, detectCarrier, getMockTrackingInfo } from '../../services/tracking'
 import { formatMMDDYYYY } from '../../utils/date'
-import OrderStatusProgress, { getOrderStatusStep } from '../orders/OrderStatusProgress'
+import OrderStatusProgress, { getOrderStatusStep, ORDER_STATUS_ILLUSTRATIONS } from '../orders/OrderStatusProgress'
+
+const STATUS_WATERMARK_ICONS = [CreditCard, Truck, Package]
 
 export default function UpcomingOrderCard({ orders, order, theme, hideHeader = false }) {
   const navigate = useNavigate()
@@ -11,6 +13,18 @@ export default function UpcomingOrderCard({ orders, order, theme, hideHeader = f
   const [isLoadingTracking, setIsLoadingTracking] = useState(false)
   const [trackingError, setTrackingError] = useState(null)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [devStatusStep, setDevStatusStep] = useState(null)
+
+  // Dev preview: force Order Placed / In Transit / Delivered from Topbar menu
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined
+    const onPreview = (e) => {
+      const step = Number(e.detail?.step)
+      if (step >= 1 && step <= 3) setDevStatusStep(step)
+    }
+    window.addEventListener('tpp:dev-preview-order-status', onPreview)
+    return () => window.removeEventListener('tpp:dev-preview-order-status', onPreview)
+  }, [])
 
   // Use orders array if provided, otherwise fall back to single order prop
   const hasOrdersProp = orders !== undefined && orders !== null
@@ -143,11 +157,35 @@ export default function UpcomingOrderCard({ orders, order, theme, hideHeader = f
   }
 
   // Prefer tracking progress (0–2) when real; otherwise map status → 1–3 step
-  const statusStep = isRealTrackingData && typeof trackingInfo.progress === 'number'
-    ? Math.min(3, Math.max(1, trackingInfo.progress + 1))
-    : getOrderStatusStep(displayStatus)
+  // Dev override wins so Preview update UX can flip Placed / Transit / Delivered
+  const statusStep = devStatusStep
+    ?? (isRealTrackingData && typeof trackingInfo.progress === 'number'
+      ? Math.min(3, Math.max(1, trackingInfo.progress + 1))
+      : getOrderStatusStep(displayStatus))
 
-  const isDelayed = String(displayStatus || statusDetail || '').toLowerCase().includes('delay')
+  const isDelayed = !devStatusStep && String(displayStatus || statusDetail || '').toLowerCase().includes('delay')
+
+  const WatermarkIcon = STATUS_WATERMARK_ICONS[statusStep - 1] || CreditCard
+  const statusArt = ORDER_STATUS_ILLUSTRATIONS[statusStep - 1] || ORDER_STATUS_ILLUSTRATIONS[0]
+  // Per-status art sizing / vertical position
+  const artSize =
+    statusArt.key === 'transit' ? 252
+    : statusArt.key === 'delivered' ? 168
+    : 176
+  // Placed + delivered: sit under the title (not pinned to card bottom)
+  const artPullUp =
+    statusArt.key === 'transit' ? -8
+    : statusArt.key === 'delivered' ? -18
+    : -28
+  const artBottomBleed =
+    statusArt.key === 'transit' ? -12
+    : statusArt.key === 'delivered' ? 28
+    : 32
+  const pinArtToBottom = statusArt.key === 'transit'
+  const orderName = currentOrder?.peptide
+    ? `${currentOrder.peptide}${currentOrder?.mg ? ` ${currentOrder.mg}mg` : ''}`
+    : undefined
+  const vendor = currentOrder?.vendor || undefined
 
   const handleWidgetClick = (e) => {
     if (e.target.closest('a, button')) return
@@ -160,7 +198,7 @@ export default function UpcomingOrderCard({ orders, order, theme, hideHeader = f
 
   return (
     <div
-      className={`${hideHeader ? 'p-3' : 'p-4'} w-full h-full flex flex-col transition-all min-h-0 rounded-xl content-card`}
+      className={`relative overflow-hidden ${hideHeader ? 'px-3 pt-1.5 pb-3' : 'p-4'} w-full h-full flex flex-col transition-all min-h-0 rounded-xl content-card`}
       style={{
         backgroundColor: 'transparent',
         borderColor: theme.border,
@@ -176,6 +214,23 @@ export default function UpcomingOrderCard({ orders, order, theme, hideHeader = f
         e.currentTarget.style.boxShadow = 'none'
       }}
     >
+      {/* Full-bleed status watermark — left side, mirrored */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute select-none"
+        style={{
+          left: -14,
+          bottom: -28,
+          opacity: theme.isDark ? 0.09 : 0.08,
+          color: theme.primary || '#557755',
+          transform: 'scaleX(-1) rotate(-14deg)',
+          zIndex: 0,
+        }}
+      >
+        <WatermarkIcon size={230} weight="duotone" />
+      </div>
+
+      <div className="relative z-[2] flex flex-col flex-1 min-h-0 w-full">
       {!hideHeader && (
         <div
           className="px-3 py-2 border-b mb-3 flex-shrink-0"
@@ -312,44 +367,104 @@ export default function UpcomingOrderCard({ orders, order, theme, hideHeader = f
         )}
       </div>
 
-      {/* Vertical timeline progress */}
-      <div className="w-full flex-shrink-0 px-1 mt-1">
-        <OrderStatusProgress
-          step={statusStep}
-          theme={theme}
-          isDelayed={isDelayed}
-          animate
-          vertical
-          placedDate={currentOrder?.date ? formatMMDDYYYY(currentOrder.date) : undefined}
-          deliveredDate={currentOrder?.deliveryDate ? formatMMDDYYYY(currentOrder.deliveryDate) : undefined}
-          orderName={currentOrder?.peptide ? `${currentOrder.peptide}${currentOrder?.mg ? ` ${currentOrder.mg}mg` : ''}` : undefined}
-          vendor={currentOrder?.vendor || undefined}
-        />
-        {ordersList.length > 1 && (
-          <div
-            className="w-full flex items-center justify-center gap-1.5 pt-2 flex-shrink-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {ordersList.map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setCurrentIndex(idx) }}
-                className="rounded-full transition-all border-0 outline-none cursor-pointer"
-                style={{
-                  width: currentIndex === idx ? 10 : 6,
-                  height: 6,
-                  backgroundColor: currentIndex === idx
-                    ? (theme.isDark ? '#7a8a72' : theme.primary)
-                    : (theme.isDark ? 'rgba(255,255,255,0.25)' : theme.border),
-                  minWidth: currentIndex === idx ? 10 : 6,
-                }}
-                title={`Order ${idx + 1} of ${ordersList.length}`}
-                aria-label={`Order ${idx + 1} of ${ordersList.length}`}
-              />
-            ))}
-          </div>
-        )}
+      {/* Timeline left + peptide/vendor top-aligned & centered right */}
+      <div className="w-full flex-1 min-h-0 px-1 mt-0 flex items-stretch gap-3">
+        <div className="flex-1 min-w-0">
+          <OrderStatusProgress
+            key={`osp-${statusStep}-${devStatusStep ?? 'live'}`}
+            step={statusStep}
+            theme={theme}
+            isDelayed={isDelayed}
+            animate
+            vertical
+            showIllustration={false}
+            placedDate={currentOrder?.date ? formatMMDDYYYY(currentOrder.date) : undefined}
+            deliveredDate={
+              statusStep === 3
+                ? (currentOrder?.deliveryDate
+                  ? formatMMDDYYYY(currentOrder.deliveryDate)
+                  : (devStatusStep === 3 ? formatMMDDYYYY(new Date()) : undefined))
+                : undefined
+            }
+          />
+          {ordersList.length > 1 && (
+            <div
+              className="w-full flex items-center justify-center gap-1.5 pt-2 flex-shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {ordersList.map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setCurrentIndex(idx) }}
+                  className="rounded-full transition-all border-0 outline-none cursor-pointer"
+                  style={{
+                    width: currentIndex === idx ? 10 : 6,
+                    height: 6,
+                    backgroundColor: currentIndex === idx
+                      ? (theme.isDark ? '#7a8a72' : theme.primary)
+                      : (theme.isDark ? 'rgba(255,255,255,0.25)' : theme.border),
+                    minWidth: currentIndex === idx ? 10 : 6,
+                  }}
+                  title={`Order ${idx + 1} of ${ordersList.length}`}
+                  aria-label={`Order ${idx + 1} of ${ordersList.length}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="flex-1 min-w-0 self-stretch flex flex-col items-center text-center"
+          style={{ paddingTop: 4 }}
+        >
+          {(orderName || vendor) && (
+            <div className="w-full flex-shrink-0">
+              {orderName && (
+                <div
+                  className="font-bold leading-snug w-full"
+                  style={{
+                    fontSize: 16,
+                    color: theme.isDark ? 'rgba(200,215,195,0.98)' : theme.primary,
+                  }}
+                >
+                  {orderName}
+                </div>
+              )}
+              {vendor && (
+                <div
+                  className="mt-1.5 leading-snug w-full"
+                  style={{
+                    fontSize: 13,
+                    color: theme.textLight || theme.text,
+                    opacity: 0.9,
+                  }}
+                >
+                  {vendor}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Centered in column; placed/delivered pulled up under title */}
+          <img
+            key={statusArt.key}
+            src={statusArt.img}
+            alt={statusArt.label}
+            className={`block mx-auto pointer-events-none relative z-[1] ${
+              pinArtToBottom ? 'mt-auto' : ''
+            }`}
+            style={{
+              width: artSize,
+              height: artSize,
+              objectFit: 'contain',
+              objectPosition: 'center bottom',
+              marginBottom: artBottomBleed,
+              marginTop: artPullUp,
+            }}
+          />
+        </div>
+      </div>
       </div>
     </div>
   )

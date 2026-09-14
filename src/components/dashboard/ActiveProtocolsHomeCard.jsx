@@ -1,8 +1,10 @@
 import React from 'react';
-import { Microscope, WarningDiamond, Note as PhNote } from '@phosphor-icons/react';
+import { Microscope, WarningDiamond, Note as PhNote, CaretRight } from '@phosphor-icons/react';
 import { getProtocolAccentHex } from '../../utils/protocolColors';
 import { getBuddyCardTint, OWNER_SELF } from '../../utils/buddies';
 import { ProtocolPurposeGlyph } from '../../utils/protocolPurposeIcons';
+import ExpandableTooltip from '../ui/ExpandableTooltip';
+import { WIDGET_TOOLTIPS } from '../../utils/widgetTooltips';
 
 /**
  * Home-dashboard Active Protocols card (kept as custom UI via DashboardWidget).
@@ -28,20 +30,18 @@ export default function ActiveProtocolsHomeCard({
         <div className="flex items-center gap-2 flex-shrink-0">
           {activeProtocols.length > 0 && (
             <span
-              className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: `${theme.primary}18`, color: theme.primary }}
+              className="flex items-center gap-1.5 text-[12px] font-bold px-2.5 py-1.5 rounded-full"
+              style={{
+                backgroundColor: (theme.primaryDark || theme.primary) + '28',
+                color: theme.primaryDark || theme.text,
+              }}
             >
               {activeProtocols.length} total
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => navigate('/app/protocols')}
-            className="text-[10px] sm:text-[11px] font-semibold rounded-lg px-2 py-0.5 transition-colors hover:opacity-90 touch-manipulation"
-            style={{ color: theme.isDark ? '#9BC9A4' : '#1f4d2c' }}
-          >
-            View all
-          </button>
+          <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+            <ExpandableTooltip content={WIDGET_TOOLTIPS.active_protocols_notes} theme={theme} />
+          </span>
         </div>
       </div>
 
@@ -49,7 +49,7 @@ export default function ActiveProtocolsHomeCard({
         <button
           type="button"
           onClick={() => navigate('/app/protocols')}
-          className="w-full flex items-center gap-3 text-left rounded-xl p-1 -m-1 transition-transform active:scale-[0.99] touch-manipulation border-0 cursor-pointer bg-transparent"
+          className="w-full flex-1 flex items-center gap-3 text-left rounded-xl p-1 -m-1 transition-transform active:scale-[0.99] touch-manipulation border-0 cursor-pointer bg-transparent"
         >
           <div
             className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
@@ -63,7 +63,7 @@ export default function ActiveProtocolsHomeCard({
           </div>
         </button>
       ) : (
-        <div className="flex flex-col gap-2 min-h-0 overflow-y-auto">
+        <div className="flex flex-1 flex-col gap-2 min-h-0 overflow-y-auto">
           {activeProtocols.map((p) => {
             const color = getProtocolAccentHex(p);
             const isBuddyOwned = p?.ownerId && p.ownerId !== OWNER_SELF;
@@ -100,42 +100,23 @@ export default function ActiveProtocolsHomeCard({
                   className="group flex items-center gap-2.5 min-w-0 flex-1 border-0 bg-transparent p-0 cursor-pointer touch-manipulation active:scale-[0.98] focus-visible:outline-none"
                   aria-label={`Open ${p.protocolName || 'protocol'}`}
                 >
-                  <div
-                    className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-[1.04]"
-                    style={{
-                      background: isBuddyOwned
-                        ? 'linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.2) 100%)'
-                        : `linear-gradient(180deg, ${color}55 0%, ${color}30 55%, ${color}1c 100%)`,
-                      boxShadow: theme.isDark
-                        ? 'inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.35)'
-                        : `inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 ${color}35`,
-                      color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color,
-                    }}
-                  >
-                    <ProtocolPurposeGlyph
-                      protocol={p}
-                      size={22}
-                      className="drop-shadow-[0_1px_1px_rgba(0,0,0,0.12)]"
-                      style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }}
-                    />
-                  </div>
+                  <ProtocolPurposeGlyph
+                    protocol={p}
+                    size={28}
+                    className="shrink-0 transition-transform duration-200 group-hover:scale-[1.04]"
+                    style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }}
+                  />
                   <div className="min-w-0 flex items-center gap-1.5">
-                    <p className="text-[11px] sm:text-xs font-semibold truncate leading-tight tracking-tight" style={{ color: rowText }}>
+                    <p className="text-sm font-semibold truncate leading-tight tracking-tight" style={{ color: rowText }}>
                       {p.protocolName || 'Untitled'}
                     </p>
-                    {isBuddyOwned ? (
+                    {isBuddyOwned && (
                       <span
                         className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
                         style={{ color, backgroundColor: `${color}35`, border: `1px solid ${color}55` }}
                       >
                         Buddy
                       </span>
-                    ) : (
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0 ring-2 ring-white/30 dark:ring-black/20 shadow-sm"
-                        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}99` }}
-                        aria-hidden
-                      />
                     )}
                   </div>
                 </button>
@@ -164,23 +145,35 @@ export default function ActiveProtocolsHomeCard({
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onSideEffect?.(p); }}
-                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
-                    style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.1)' : `${color}15` }}
+                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg touch-manipulation active:scale-[0.93] transition-all border"
+                    style={{
+                      backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.14)' : `${color}22`,
+                      borderColor: isBuddyOwned ? 'rgba(255,255,255,0.22)' : `${color}40`,
+                      boxShadow: isBuddyOwned
+                        ? '0 1px 2px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.12)'
+                        : `0 1px 3px ${color}28, inset 0 1px 0 rgba(255,255,255,0.65)`,
+                    }}
                     title={`Log side effect for ${p.protocolName}`}
                   >
-                    <WarningDiamond size={16} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
-                    <span className="text-[10px] font-semibold leading-none" style={{ color: rowTextMuted }}>Side effect</span>
+                    <WarningDiamond size={18} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }} />
+                    <span className="text-[11px] font-semibold leading-none" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }}>Side Effect</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onNotes?.(p); }}
-                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg touch-manipulation active:scale-[0.93] transition-all"
-                    style={{ backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.1)' : `${color}15` }}
+                    className="flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg touch-manipulation active:scale-[0.93] transition-all border"
+                    style={{
+                      backgroundColor: isBuddyOwned ? 'rgba(255,255,255,0.14)' : `${color}22`,
+                      borderColor: isBuddyOwned ? 'rgba(255,255,255,0.22)' : `${color}40`,
+                      boxShadow: isBuddyOwned
+                        ? '0 1px 2px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.12)'
+                        : `0 1px 3px ${color}28, inset 0 1px 0 rgba(255,255,255,0.65)`,
+                    }}
                     title={`Notes for ${p.protocolName}`}
                   >
-                    <PhNote size={16} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.85)' : color }} />
-                    <span className="text-[10px] font-semibold leading-none" style={{ color: rowTextMuted }}>Note</span>
+                    <PhNote size={18} weight="duotone" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }} />
+                    <span className="text-[11px] font-semibold leading-none" style={{ color: isBuddyOwned ? 'rgba(255,255,255,0.9)' : color }}>Note</span>
                   </button>
                 </div>
               </div>
@@ -191,24 +184,44 @@ export default function ActiveProtocolsHomeCard({
             <button
               type="button"
               onClick={() => onSideEffect?.({ id: null, protocolName: null })}
-              className="flex-1 rounded-xl py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
-              style={{ color: theme.textLight, borderColor: theme.border || 'rgba(0,0,0,0.08)', backgroundColor: 'transparent' }}
+              className="flex-1 rounded-xl py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97] touch-manipulation border"
+              style={{
+                color: theme.primaryDark || theme.text,
+                borderColor: `${theme.primary}40`,
+                backgroundColor: `${theme.primary}18`,
+                boxShadow: `0 1px 3px ${theme.primary}28, inset 0 1px 0 rgba(255,255,255,0.65)`,
+              }}
             >
-              <WarningDiamond size={16} weight="duotone" />
-              Side effect
+              <WarningDiamond size={20} weight="duotone" />
+              Side Effect
             </button>
             <button
               type="button"
               onClick={() => onNotes?.({ id: null, protocolName: null })}
-              className="flex-1 rounded-xl py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.97] touch-manipulation border"
-              style={{ color: theme.textLight, borderColor: theme.border || 'rgba(0,0,0,0.08)', backgroundColor: 'transparent' }}
+              className="flex-1 rounded-xl py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.97] touch-manipulation border"
+              style={{
+                color: theme.primaryDark || theme.text,
+                borderColor: `${theme.primary}40`,
+                backgroundColor: `${theme.primary}18`,
+                boxShadow: `0 1px 3px ${theme.primary}28, inset 0 1px 0 rgba(255,255,255,0.65)`,
+              }}
             >
-              <PhNote size={16} weight="duotone" />
+              <PhNote size={20} weight="duotone" />
               Notes
             </button>
           </div>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => navigate('/app/protocols')}
+        className="flex items-center justify-center gap-1.5 mt-auto pt-3 w-full border-0 bg-transparent touch-manipulation active:scale-[0.98]"
+        style={{ color: theme.isDark ? theme.textLight : theme.primary }}
+      >
+        <span className="text-sm font-semibold">View all</span>
+        <CaretRight size={14} weight="bold" aria-hidden />
+      </button>
     </div>
   );
 }

@@ -546,7 +546,7 @@ const TaskListSection = ({
                         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 overflow-hidden">
                             <div className="flex-1 min-w-0 overflow-hidden">
                                 <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                                    <div className={`font-semibold text-xs sm:text-sm truncate ${task.completed || isInactiveDose ? 'line-through decoration-2' : ''}`} style={{ color: task.completed || isInactiveDose ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.text }}>
+                                    <div className={`font-semibold text-sm sm:text-base truncate ${task.completed || isInactiveDose ? 'line-through decoration-2' : ''}`} style={{ color: task.completed || isInactiveDose ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.text }}>
                                         {task.name}
                                     </div>
                                     {statusChip && (
@@ -559,7 +559,7 @@ const TaskListSection = ({
                                     {/* Time chip - PM chip darker to match PM row differentiation */}
                                     {task.time && (
                                         <div 
-                                            className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md text-[10px] sm:text-xs text-white whitespace-nowrap flex-shrink-0"
+                                            className="px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-xs sm:text-sm font-semibold text-white whitespace-nowrap flex-shrink-0"
                                             style={{ 
                                                 backgroundColor: task.completed || isInactiveDose
                                                     ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') 
@@ -577,18 +577,18 @@ const TaskListSection = ({
                             </div>
                         </div>
                         
-                        <div className={`text-right flex items-center gap-1 sm:gap-2 flex-shrink-0 ${task.completed ? 'line-through decoration-2' : ''}`} style={{ color: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : undefined }}>
+                        <div className={`text-right flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0 ${task.completed ? 'line-through decoration-2' : ''}`} style={{ color: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : undefined }}>
                             <div className="text-right">
-                                <div className="font-medium text-xs sm:text-sm whitespace-nowrap" style={{ color: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.text }}>
+                                <div className="font-medium text-sm sm:text-base whitespace-nowrap" style={{ color: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.text }}>
                                     {task.dose}{task.unit ? ` ${task.unit}` : ''}
                                 </div>
                             </div>
                             {/* Show pen color and type if penColor is set, regardless of delivery method */}
                             {/* This matches Calendar behavior where pen color is shown when available */}
                             {task.penColor && (
-                                <div className="flex items-center gap-0.5 sm:gap-1">
+                                <div className="flex items-center gap-1 sm:gap-1.5">
                                     <div 
-                                        className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shadow-sm flex-shrink-0" 
+                                        className="w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full shadow-sm flex-shrink-0" 
                                         style={{ 
                                             border: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
                                             background: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.15)' : '#d1d5db') : getChromeGradient(getResolvedPenColor(task.penColor)),
@@ -597,7 +597,7 @@ const TaskListSection = ({
                                         title={`Pen Color: ${task.penColor || 'Default'}`}
                                     />
                                     {task.penType && (
-                                        <span className="text-[10px] sm:text-xs font-medium hidden xs:inline" style={{ color: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.textLight }}>
+                                        <span className="text-xs sm:text-sm font-medium hidden xs:inline" style={{ color: task.completed ? (theme.isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af') : theme.textLight }}>
                                             {task.penType.toUpperCase()}
                                         </span>
                                     )}
@@ -640,7 +640,7 @@ const TaskListSection = ({
                                         aria-label="Schedule options"
                                         title="Schedule options"
                                     >
-                                        <DotsThreeVertical size={20} weight="bold" className="sm:w-[22px] sm:h-[22px]" />
+                                        <DotsThreeVertical size={22} weight="bold" className="sm:w-6 sm:h-6" />
                                     </button>
                                 </div>
                             )}
@@ -679,7 +679,7 @@ const TaskListSection = ({
                                         onToggle(task);
                                     }
                                 }}
-                                className={`w-5 h-5 sm:w-6 sm:h-6 rounded-sm border-2 relative flex items-center justify-center flex-shrink-0 transition-all ${isOneOff ? 'cursor-default' : 'hover:scale-110 cursor-pointer'} touch-manipulation${checkPopIds.has(task.id) ? ' tpp-task-check-pop' : ''}`}
+                                className={`w-6 h-6 sm:w-7 sm:h-7 rounded-sm border-2 relative flex items-center justify-center flex-shrink-0 transition-all ${isOneOff ? 'cursor-default' : 'hover:scale-110 cursor-pointer'} touch-manipulation${checkPopIds.has(task.id) ? ' tpp-task-check-pop' : ''}`}
                                 style={{
                                     borderColor: task.completed 
                                         ? (timeSlot === 'PM' 
@@ -692,8 +692,8 @@ const TaskListSection = ({
                                             : (theme.isDark ? '#6b7f65' : theme.primary)) 
                                         : 'transparent',
                                     borderRadius: '4px',
-                                    minWidth: '20px',
-                                    minHeight: '20px',
+                                    minWidth: '24px',
+                                    minHeight: '24px',
                                     WebkitTapHighlightColor: 'transparent',
                                     boxShadow: theme.isDark 
                                         ? 'inset 0 2px 4px rgba(0, 0, 0, 0.35)' 
@@ -704,8 +704,8 @@ const TaskListSection = ({
                             >
                                 {task.completed && (
                                     <Check 
-                                        size={14} 
-                                        className="sm:w-[18px] sm:h-[18px] absolute text-white" 
+                                        size={16} 
+                                        className="sm:w-5 sm:h-5 absolute text-white" 
                                         style={{ 
                                             strokeWidth: 2.5,
                                             top: '-3px',
@@ -1003,9 +1003,9 @@ const TaskListSection = ({
 
 const DeliveryIcon = ({ task, theme }) => {
     const iconProps = {
-        size: 16,
+        size: 24,
         weight: 'duotone',
-        className: 'sm:w-[18px] sm:h-[18px]',
+        className: 'sm:w-[26px] sm:h-[26px]',
         style: { color: theme.textLight },
     };
 

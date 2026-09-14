@@ -1297,6 +1297,9 @@ export default function Topbar({ onMenuClick, theme, tabs, activeTab, onTabChang
                     { kind: 'medication-tab-spotlight', label: 'Spotlight · Medication tab', medicationTabSpotlight: true, live: true },
                     { kind: 'supplies-tab-spotlight', label: 'Spotlight · Supplies tab', suppliesTabSpotlight: true, live: true },
                     { kind: 'scan-label-spotlight', label: 'Spotlight · Scan Label', scanLabelSpotlight: true, live: true },
+                    { kind: 'order-placed', label: 'Incoming order · Placed', orderStatusStep: 1, live: true },
+                    { kind: 'order-transit', label: 'Incoming order · In Transit', orderStatusStep: 2, live: true },
+                    { kind: 'order-delivered', label: 'Incoming order · Delivered', orderStatusStep: 3, live: true },
                   ].map((item, i) => (
                     <button
                       key={item.kind}
@@ -1367,6 +1370,14 @@ export default function Topbar({ onMenuClick, theme, tabs, activeTab, onTabChang
                         if (item.scanLabelSpotlight) {
                           window.dispatchEvent(
                             new CustomEvent('tpp:dev-preview-scan-label-spotlight')
+                          );
+                          return;
+                        }
+                        if (item.orderStatusStep) {
+                          window.dispatchEvent(
+                            new CustomEvent('tpp:dev-preview-order-status', {
+                              detail: { step: item.orderStatusStep },
+                            })
                           );
                           return;
                         }

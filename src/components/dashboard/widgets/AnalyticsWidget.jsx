@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PresentationChart, Lightning, CaretRight, Clock, Pulse, CurrencyDollar, Flask, Archive } from '@phosphor-icons/react';
+import { PresentationChart, CaretRight, Clock, Pulse, CurrencyDollar, Flask, Archive } from '@phosphor-icons/react';
 import ExpandableTooltip from '../../ui/ExpandableTooltip';
 import { WIDGET_TOOLTIPS } from '../../../utils/widgetTooltips';
 import { formatCurrency } from '../../../utils/currencyUtils';
@@ -55,6 +55,8 @@ function protocolDaysLeft(p) {
   return Math.ceil((end - new Date()) / 86400000);
 }
 
+const PERIOD_OPTIONS = [7, 14, 30];
+
 const AnalyticsWidget = ({ widget, theme }) => {
   const navigate = useNavigate();
   const { protocols: ctxProtocols, supplements: ctxSupplements, reconItems: ctxReconItems, orders: ctxOrders, stockpile: ctxStockpile } = useAppContext();
@@ -65,6 +67,7 @@ const AnalyticsWidget = ({ widget, theme }) => {
   const stockpile = useMemo(() => filterAccountHolderRecords(ctxStockpile || []), [ctxStockpile]);
   const protocolHistory = useLocal('tpprover_protocol_history', []);
   const [taskCompletion, setTaskCompletion] = useState(() => getTaskCompletion());
+  const [periodDays, setPeriodDays] = useState(30);
 
   useEffect(() => {
     const refresh = () => setTaskCompletion(getTaskCompletion());
@@ -77,52 +80,29 @@ const AnalyticsWidget = ({ widget, theme }) => {
   }, []);
 
   const complianceData = useMemo(() => {
-    let planned30 = 0, done30 = 0;
+    let planned = 0, done = 0;
     const last7 = [];
 
-    for (let i = 29; i >= 0; i--) {
+    for (let i = periodDays - 1; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
       const r = countDayTasks(d, protocols, supplements, reconItems, taskCompletion);
-      planned30 += r.planned;
-      done30 += r.done;
+      planned += r.planned;
+      done += r.done;
       if (i < 7) {
         last7.push({ date: d, planned: r.planned, done: r.done, completed: r.planned === 0 || r.done === r.planned });
       }
     }
-    const pct = planned30 > 0 ? Math.round((done30 / planned30) * 100) : 0;
+    const pct = planned > 0 ? Math.round((done / planned) * 100) : 0;
 
-    // Current streak
-    let streak = 0;
-    for (let i = 0; i < 90; i++) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      const r = countDayTasks(d, protocols, supplements, reconItems, taskCompletion);
-      if (r.planned > 0 && r.done === r.planned) streak++;
-      else if (r.planned > 0) break;
-    }
-
-    // Best streak ever (look back 180 days)
-    let bestStreak = 0, runStreak = 0;
-    for (let i = 179; i >= 0; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      const r = countDayTasks(d, protocols, supplements, reconItems, taskCompletion);
-      if (r.planned > 0 && r.done === r.planned) {
-        runStreak++;
-        if (runStreak > bestStreak) bestStreak = runStreak;
-      } else if (r.planned > 0) {
-        runStreak = 0;
-      }
-    }
-    bestStreak = Math.max(bestStreak, streak);
-
-    return { pct, streak, bestStreak, hasData: planned30 > 0, last7, dosesLogged30d: done30 };
-  }, [protocols, supplements, reconItems, taskCompletion]);
+    return { pct, hasData: planned > 0, last7, dosesLogged: done };
+  }, [protocols, supplements, reconItems, taskCompletion, periodDays]);
 
   const spendingData = useMemo(() => {
     const now = new Date();
     const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    let lastMonthSpend = 0, totalSpend = 0, last30Spend = 0;
+    const periodStart = new Date(); periodStart.setDate(periodStart.getDate() - periodDays);
+    let lastMonthSpend = 0, totalSpend = 0, periodSpend = 0;
     const ordersWithCosts = new Set();
 
     // Spend by compound
@@ -153,7 +133,7 @@ const AnalyticsWidget = ({ widget, theme }) => {
         const orderDate = order.date ? new Date(order.date) : null;
         totalSpend += totalCost;
         if (orderDate && orderDate >= lastMonthStart && orderDate <= lastMonthEnd) lastMonthSpend += totalCost;
-        if (orderDate && orderDate >= thirtyDaysAgo) last30Spend += totalCost;
+        if (orderDate && orderDate >= periodStart) periodSpend += totalCost;
       }
     });
 
@@ -165,18 +145,18 @@ const AnalyticsWidget = ({ widget, theme }) => {
         totalSpend += stockItemTotal;
         const purchaseDate = stockItem.purchaseDate ? new Date(stockItem.purchaseDate) : null;
         if (purchaseDate && purchaseDate >= lastMonthStart && purchaseDate <= lastMonthEnd) lastMonthSpend += stockItemTotal;
-        if (purchaseDate && purchaseDate >= thirtyDaysAgo) last30Spend += stockItemTotal;
+        if (purchaseDate && purchaseDate >= periodStart) periodSpend += stockItemTotal;
       }
     });
 
-    const avgDailySpend30 = last30Spend / 30;
+    const avgDailySpend = periodSpend / periodDays;
 
     const compoundList = Object.entries(byCompound)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4);
 
-    return { lastMonthSpend, last30Spend, totalSpend, avgDailySpend30, compoundList };
-  }, [orders, stockpile]);
+    return { lastMonthSpend, periodSpend, totalSpend, avgDailySpend, compoundList };
+  }, [orders, stockpile, periodDays]);
 
   const inventoryData = useMemo(() => {
     const stockpileValue = stockpile.reduce((s, item) =>
@@ -205,20 +185,22 @@ const AnalyticsWidget = ({ widget, theme }) => {
   };
 
   const subtleBg = theme.isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
-  
+  const badgeColor = theme.primaryDark || theme.text;
+  const badgeBase = (theme.primaryDark || theme.primary);
+
   const secondaryStats = [
     {
-      label: 'Spend (30d)',
-      value: formatCurrency(spendingData.last30Spend ?? spendingData.lastMonthSpend),
+      label: 'Spent',
+      value: formatCurrency(spendingData.periodSpend ?? spendingData.lastMonthSpend),
       Icon: CurrencyDollar,
     },
     {
-      label: 'Doses (30d)',
-      value: complianceData.hasData ? String(complianceData.dosesLogged30d) : '—',
+      label: 'Doses',
+      value: complianceData.hasData ? String(complianceData.dosesLogged) : '—',
       Icon: Pulse,
     },
     {
-      label: 'Stockpile Val',
+      label: 'Stockpile Value',
       value: formatCurrency(inventoryData.stockpileValue),
       Icon: Archive,
     },
@@ -239,57 +221,63 @@ const AnalyticsWidget = ({ widget, theme }) => {
     >
       {/* Header */}
       <div className="flex-shrink-0 px-4 py-3 widget-separator" style={{ borderColor: theme.isDark ? 'transparent' : 'rgba(47, 59, 58, 0.4)' }}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: theme.text }}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-base font-bold flex items-center gap-2 min-w-0" style={{ color: theme.text }}>
             Analytics
-            <PresentationChart size={18} weight="duotone" style={{ color: theme.primary }} />
+            <PresentationChart size={22} weight="duotone" style={{ color: theme.primary }} />
           </h3>
-          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="flex items-center gap-0.5 p-0.5 rounded-full"
+              style={{ backgroundColor: badgeBase + '14' }}
+              role="group"
+              aria-label="Analytics time range"
+            >
+              {PERIOD_OPTIONS.map((days) => {
+                const selected = periodDays === days;
+                return (
+                  <button
+                    key={days}
+                    type="button"
+                    onClick={() => setPeriodDays(days)}
+                    className="text-[12px] font-bold px-2.5 py-1.5 rounded-full transition-all duration-200 hover:scale-105 active:scale-95 border-0 tabular-nums leading-none"
+                    style={{
+                      backgroundColor: selected ? badgeBase + '28' : 'transparent',
+                      color: badgeColor,
+                      boxShadow: selected ? `0 0 0 2px ${badgeBase}30` : 'none',
+                    }}
+                    aria-pressed={selected}
+                    aria-label={`Last ${days} days`}
+                  >
+                    {days}d
+                  </button>
+                );
+              })}
+            </div>
             <ExpandableTooltip content={WIDGET_TOOLTIPS.analytics} theme={theme} />
           </div>
         </div>
       </div>
 
       <div className="flex-1 min-h-0 px-4 py-3 flex flex-col gap-3">
-        {/* Premium Hero Box */}
-        <div 
-          className="rounded-xl p-3 flex flex-col gap-2"
-          style={{ 
-            backgroundColor: theme.isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-            border: `1px solid ${theme.border}`,
-            boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.05)'
-          }}
-        >
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.textLight }}>
-                  Consistency
-                </span>
-                {complianceData.hasData && complianceData.streak > 0 && (
-                  <div
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold"
-                    style={{ backgroundColor: `${theme.primary}15`, color: theme.primary }}
-                  >
-                    <Lightning size={10} weight="fill" aria-hidden />
-                    {complianceData.streak}d
-                  </div>
-                )}
-              </div>
-              <div className="flex items-baseline gap-1.5">
-                <span
-                  className="text-2xl font-bold tabular-nums leading-none"
-                  style={{ color: complianceData.hasData ? getComplianceColor(complianceData.pct) : theme.textLight }}
-                >
-                  {complianceData.hasData ? `${complianceData.pct}%` : '—'}
-                </span>
-                <span className="text-[10px]" style={{ color: theme.textLight, opacity: 0.8 }}>30d</span>
-              </div>
+        {/* Consistency hero — no nested card */}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: theme.textLight }}>
+            Consistency
+          </span>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-baseline gap-2 flex-shrink-0">
+              <span
+                className="text-3xl font-bold tabular-nums leading-none"
+                style={{ color: complianceData.hasData ? getComplianceColor(complianceData.pct) : theme.textLight }}
+              >
+                {complianceData.hasData ? `${complianceData.pct}%` : '—'}
+              </span>
             </div>
 
-            {/* 7-day strip integrated into hero */}
+            {/* 7-day strip — fills remaining card width beside % */}
             {complianceData.hasData && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-1 min-w-0 items-center justify-between">
                 {complianceData.last7.map((day) => {
                   const label = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][day.date.getDay()];
                   const hasTasks = day.planned > 0;
@@ -298,17 +286,17 @@ const AnalyticsWidget = ({ widget, theme }) => {
                   const isToday = toKey(day.date) === toKey(new Date());
 
                   return (
-                    <div key={day.date.toISOString()} className="flex flex-col items-center gap-1">
+                    <div key={day.date.toISOString()} className="flex flex-1 flex-col items-center gap-1.5">
                       <span
-                        className="text-[8px] font-bold"
-                        style={{ color: isToday ? theme.primary : theme.textLight, opacity: isToday ? 1 : 0.6 }}
+                        className="text-[11px] font-bold leading-none"
+                        style={{ color: isToday ? theme.primary : theme.textLight, opacity: isToday ? 1 : 0.75 }}
                       >
                         {label}
                       </span>
                       <div
                         style={{
-                          width: isToday ? 10 : 8,
-                          height: isToday ? 10 : 8,
+                          width: isToday ? 14 : 12,
+                          height: isToday ? 14 : 12,
                           borderRadius: '50%',
                           backgroundColor: !hasTasks
                             ? (theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)')
@@ -337,20 +325,15 @@ const AnalyticsWidget = ({ widget, theme }) => {
             return (
               <div
                 key={stat.label}
-                className="flex items-center gap-2.5 p-2.5 rounded-xl transition-colors"
+                className="flex items-center gap-2.5 p-3 rounded-xl transition-colors"
                 style={{ backgroundColor: subtleBg, border: `1px solid ${theme.border}` }}
               >
-                <div 
-                  className="flex items-center justify-center rounded-lg flex-shrink-0"
-                  style={{ width: 30, height: 30, backgroundColor: `${theme.primary}12`, color: theme.primary }}
-                >
-                  <Icon size={15} weight="duotone" />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[13px] font-bold tabular-nums truncate" style={{ color: theme.text }}>
+                <Icon size={28} weight="duotone" style={{ color: theme.primary, flexShrink: 0 }} aria-hidden />
+                <div className="flex flex-col min-w-0 gap-0.5">
+                  <span className="text-lg font-bold tabular-nums truncate leading-tight" style={{ color: theme.text }}>
                     {stat.value}
                   </span>
-                  <span className="text-[9px] font-medium text-ellipsis overflow-hidden whitespace-nowrap" style={{ color: theme.textLight }}>
+                  <span className="text-xs font-medium text-ellipsis overflow-hidden whitespace-nowrap" style={{ color: theme.textLight }}>
                     {stat.label}
                   </span>
                 </div>
@@ -377,11 +360,11 @@ const AnalyticsWidget = ({ widget, theme }) => {
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-1 mt-auto pt-2">
-          <span className="text-[11px] font-semibold" style={{ color: theme.isDark ? theme.textLight : theme.primary, opacity: 0.9 }}>
-            View full analytics
+        <div className="flex items-center justify-center gap-1.5 mt-auto pt-2">
+          <span className="text-sm font-semibold" style={{ color: theme.isDark ? theme.textLight : theme.primary, opacity: 0.9 }}>
+            View Insights
           </span>
-          <CaretRight size={11} weight="bold" style={{ color: theme.isDark ? theme.textLight : theme.primary, opacity: 0.9 }} />
+          <CaretRight size={14} weight="bold" style={{ color: theme.isDark ? theme.textLight : theme.primary, opacity: 0.9 }} />
         </div>
       </div>
     </div>

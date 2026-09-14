@@ -49,11 +49,14 @@ const ICON_MAP = {
   'FileText': FileText,
 };
 
-const ExpandableTooltip = ({ content, theme, position = 'left', controlSize, title = 'About this widget' }) => {
+const ExpandableTooltip = ({ content, theme, position = 'left', controlSize, title }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const buttonRef = useRef(null);
   const tooltipRef = useRef(null);
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
+
+  const body = typeof content === 'string' ? content : (content?.body || '');
+  const resolvedTitle = title || (typeof content === 'object' && content?.title) || 'About this widget';
 
   // Update position when expanded or window resizes
   useEffect(() => {
@@ -199,7 +202,7 @@ const ExpandableTooltip = ({ content, theme, position = 'left', controlSize, tit
             <div className="flex items-center gap-2">
               <SealQuestion size={18} weight="duotone" color={theme.primary} />
               <span className="text-xs font-semibold" style={{ color: theme.text }}>
-                {title}
+                {resolvedTitle}
               </span>
             </div>
             <button
@@ -218,7 +221,7 @@ const ExpandableTooltip = ({ content, theme, position = 'left', controlSize, tit
             className="text-xs leading-tight"
             style={{ color: theme.textLight, wordWrap: 'break-word', overflowWrap: 'break-word' }}
           >
-            {content.split('\n').map((line, index) => {
+            {body.split('\n').map((line, index) => {
               if (!line.trim()) return null;
               
               // Check if line starts with [IconName] format

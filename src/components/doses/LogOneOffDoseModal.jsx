@@ -5,7 +5,8 @@ import CombinedDosageInput from '../common/inputs/CombinedDosageInput';
 import GlassmorphismDatePicker from '../common/GlassmorphismDatePicker';
 import InjectionSiteSelector from '../common/InjectionSiteSelector';
 import ExpandableTooltip from '../ui/ExpandableTooltip';
-import { Syringe, Loader2, Check, MapPin, X, AlertCircle } from 'lucide-react';
+import { Loader2, Check, AlertCircle } from 'lucide-react';
+import { Syringe, Pen, SprayBottle, Hand } from '@phosphor-icons/react';
 import { getLocalDateString } from '../../utils/date';
 import { prepareItemForSave } from '../../utils/userDataSave';
 import { useAppContext } from '../../context/AppContext';
@@ -17,15 +18,14 @@ import { recordInjectionSite } from '../../utils/injectionTracking';
 import { isInjectionSiteTrackingEnabled } from '../../utils/injectionSiteSettings';
 
 const DELIVERY_OPTIONS = [
-  { id: 'pipette', label: 'Syringe' },
-  { id: 'pen', label: 'Pen' },
-  { id: 'nasal', label: 'Nasal' },
-  { id: 'topical', label: 'Topical' },
+  { id: 'pipette', label: 'Syringe', Icon: Syringe },
+  { id: 'pen', label: 'Pen', Icon: Pen },
+  { id: 'nasal', label: 'Nasal', Icon: SprayBottle },
+  { id: 'topical', label: 'Topical', Icon: Hand },
 ];
 
-function toTitleCase(str) {
-  if (!str || typeof str !== 'string') return str;
-  return str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+function isInjectionDelivery(method) {
+  return method === 'pipette' || method === 'syringe' || method === 'pen' || method === 'injection';
 }
 
 function getDefaultForm(dateKey, prefilledProtocol) {
@@ -52,9 +52,12 @@ function getDefaultForm(dateKey, prefilledProtocol) {
   };
 }
 
-const ONE_OFF_DOSE_TOOLTIP = `[Pipette] A one-off dose is a single shot you log without starting a protocol.
+const ONE_OFF_DOSE_TOOLTIP = {
+  title: 'About One-Off Dose',
+  body: `[Pipette] A one-off dose is a single shot you log without starting a protocol.
 [CheckCircle] Use it for random or as-needed doses so you don't start/stop a schedule every day.
-[Zap] After logging, you can optionally save it as an as-needed protocol for next time.`;
+[Zap] After logging, you can optionally save it as an as-needed protocol for next time.`,
+};
 
 /**
  * Log a one-off dose (no protocol). After save, optionally promote to an as-needed protocol.
@@ -240,12 +243,16 @@ export default function LogOneOffDoseModal({
     handleClose();
   };
 
-  const showInjectionSite =
-    isInjectionSiteTrackingEnabled() &&
-    (form.deliveryMethod === 'pipette' ||
-      form.deliveryMethod === 'syringe' ||
-      form.deliveryMethod === 'pen' ||
-      form.deliveryMethod === 'injection');
+  const handleDeliverySelect = (id) => {
+    setForm((prev) => ({
+      ...prev,
+      deliveryMethod: id,
+      injectionSite: isInjectionDelivery(id) ? prev.injectionSite : '',
+    }));
+    if (isInjectionSiteTrackingEnabled() && isInjectionDelivery(id)) {
+      setShowSitePicker(true);
+    }
+  };
 
   // Already has an as-needed protocol — just acknowledge and close
   if (step === 'existing') {
@@ -345,21 +352,7 @@ export default function LogOneOffDoseModal({
       maxHeight="90vh"
       fitContent
       footer={
-        <div className="w-full flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={isSaving}
-            className="px-4 py-2 text-sm font-medium transition-opacity hover:opacity-70"
-            style={{
-              backgroundColor: 'transparent',
-              color: theme?.text || '#111827',
-              border: 'none',
-              opacity: isSaving ? 0.5 : 1,
-            }}
-          >
-            Cancel
-          </button>
+        <div className="w-full flex items-center justify-end">
           <button
             type="button"
             onClick={handleSave}
@@ -371,18 +364,18 @@ export default function LogOneOffDoseModal({
               border: 'none',
             }}
           >
-            {isSaving ? <Loader2 size={15} className="animate-spin" /> : <Syringe size={15} />}
+            {isSaving ? <Loader2 size={15} className="animate-spin" /> : null}
             Log dose
           </button>
         </div>
       }
     >
       <div className="space-y-2 px-0.5 pb-1">
-        {/* Peptide + Dose */}
-        <div className="space-y-2">
-          <div className="relative">
+        {/* Peptide + Dose — one row */}
+        <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-2 items-start">
+          <div className="relative min-w-0">
             <TextInput
-              label="Peptide"
+              label="Peptide Name"
               value={form.peptideName}
               onChange={(v) => {
                 setShowNameSuggestions(true);
@@ -394,8 +387,6 @@ export default function LogOneOffDoseModal({
               theme={theme}
               placeholder="e.g. PT-141"
               outlined
-              dense
-              minimalOutline
             />
             {filteredSuggestions.length > 0 && (
               <div
@@ -420,42 +411,43 @@ export default function LogOneOffDoseModal({
             )}
           </div>
 
-          <CombinedDosageInput
-            value={form.dose}
-            onChange={(dose) => setForm((prev) => ({ ...prev, dose }))}
-            theme={theme}
-            deliveryMethod={form.deliveryMethod}
-            outlined
-          />
+          <div className="min-w-0">
+            <CombinedDosageInput
+              value={form.dose}
+              onChange={(dose) => setForm((prev) => ({ ...prev, dose }))}
+              theme={theme}
+              deliveryMethod={form.deliveryMethod}
+              outlined
+            />
+          </div>
         </div>
 
-        {/* When + how — single compact card */}
+        {/* When + how */}
         <div
-          className="rounded-xl p-2.5 space-y-2"
+          className="rounded-xl p-3.5 space-y-2.5"
           style={{
             backgroundColor: theme?.isDark ? 'rgba(255,255,255,0.04)' : `${theme?.primary || '#445952'}0a`,
             border: `1px solid ${theme?.isDark ? 'rgba(255,255,255,0.06)' : `${theme?.primary || '#445952'}14`}`,
           }}
         >
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+          <div className="grid grid-cols-2 gap-2.5 items-end">
             <div className="min-w-0">
-              <label className="block text-[9px] font-bold uppercase tracking-wider mb-1" style={{ color: theme?.textLight }}>
+              <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: theme?.textLight }}>
                 Date
               </label>
               <GlassmorphismDatePicker
                 value={form.dateKey}
                 onChange={(v) => setForm((prev) => ({ ...prev, dateKey: v }))}
                 theme={theme}
-                compact
                 outlined
               />
             </div>
-            <div className="flex-shrink-0">
-              <label className="block text-[9px] font-bold uppercase tracking-wider mb-1" style={{ color: theme?.textLight }}>
+            <div className="min-w-0">
+              <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: theme?.textLight }}>
                 Time
               </label>
               <div
-                className="inline-flex rounded-lg p-0.5 gap-0.5"
+                className="flex w-full rounded-lg p-1 gap-0.5"
                 style={{ backgroundColor: theme?.isDark ? '#1a2028' : 'rgba(255,255,255,0.85)' }}
               >
                 {['AM', 'PM'].map((slot) => (
@@ -463,7 +455,7 @@ export default function LogOneOffDoseModal({
                     key={slot}
                     type="button"
                     onClick={() => setForm((prev) => ({ ...prev, timeSlot: slot }))}
-                    className="px-2.5 py-1.5 text-[11px] font-bold rounded-md"
+                    className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
                     style={{
                       backgroundColor: form.timeSlot === slot ? (theme?.primaryDark || theme?.primary || '#445952') : 'transparent',
                       color: form.timeSlot === slot ? '#fff' : theme?.textLight,
@@ -477,76 +469,39 @@ export default function LogOneOffDoseModal({
           </div>
 
           <div>
-            <label className="block text-[9px] font-bold uppercase tracking-wider mb-1" style={{ color: theme?.textLight }}>
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: theme?.textLight }}>
               Delivery
             </label>
-            <div
-              className="grid grid-cols-4 gap-1 rounded-lg p-0.5"
-              style={{ backgroundColor: theme?.isDark ? '#1a2028' : 'rgba(255,255,255,0.85)' }}
-            >
-              {DELIVERY_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setForm((prev) => ({ ...prev, deliveryMethod: opt.id }))}
-                  className="py-1.5 text-[11px] font-semibold rounded-md truncate"
-                  style={{
-                    backgroundColor: form.deliveryMethod === opt.id ? (theme?.primaryDark || theme?.primary || '#445952') : 'transparent',
-                    color: form.deliveryMethod === opt.id ? '#fff' : theme?.textLight,
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-1.5">
+              {DELIVERY_OPTIONS.map(({ id, label, Icon }) => {
+                const selected = form.deliveryMethod === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => handleDeliverySelect(id)}
+                    className="flex flex-col items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                    style={{
+                      backgroundColor: selected
+                        ? (theme?.primaryDark || theme?.primary || '#445952')
+                        : (theme?.isDark ? '#1f2937' : '#f5f4f0'),
+                      color: selected ? '#fff' : theme?.text,
+                      border: selected
+                        ? `1px solid ${theme?.primaryDark || '#3B4240'}`
+                        : `1px solid ${theme?.border || '#e5e7eb'}`,
+                      boxShadow: selected
+                        ? 'inset 0 2px 4px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.1)'
+                        : 'inset 0 1px 3px rgba(0,0,0,0.06)',
+                    }}
+                  >
+                    <Icon size={18} weight="duotone" />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-
-          {showInjectionSite && (
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <button
-                type="button"
-                onClick={() => setShowSitePicker(true)}
-                className="flex-1 flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition-all"
-                style={{
-                  border: `1px solid ${form.injectionSite ? (theme?.primary || '#445952') : (theme?.border || '#ddd')}`,
-                  backgroundColor: form.injectionSite
-                    ? (theme?.isDark ? `${theme.primary}18` : `${theme.primary}12`)
-                    : (theme?.isDark ? 'rgba(255,255,255,0.03)' : '#fff'),
-                  color: form.injectionSite ? theme?.text : theme?.textLight,
-                }}
-              >
-                <MapPin size={14} style={{ color: theme?.primary || '#445952', flexShrink: 0 }} />
-                <span className="truncate font-medium">
-                  {form.injectionSite ? toTitleCase(form.injectionSite) : 'Select injection site'}
-                </span>
-              </button>
-              {form.injectionSite ? (
-                <button
-                  type="button"
-                  onClick={() => setForm((prev) => ({ ...prev, injectionSite: '' }))}
-                  className="p-1.5 rounded-md flex-shrink-0"
-                  style={{ color: theme?.textLight, backgroundColor: theme?.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}
-                  aria-label="Clear injection site"
-                >
-                  <X size={14} />
-                </button>
-              ) : null}
-            </div>
-          )}
         </div>
-
-        <TextInput
-          label="Notes"
-          value={form.notes}
-          onChange={(v) => setForm((prev) => ({ ...prev, notes: v }))}
-          theme={theme}
-          placeholder="Optional note"
-          outlined
-          dense
-          minimalOutline
-          multiline
-          rows={1}
-        />
       </div>
 
       <InjectionSiteSelector
