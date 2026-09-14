@@ -11,16 +11,26 @@ on:
         description: 'Git ref to deploy (branch/SHA). Use the fix branch until it is merged.'
         required: true
         default: 'cursor/fix-admin-support-inbox-queue-bc18'
+  # Allow deploy from this feature branch without merging to main first.
+  # Touch scripts/trigger-support-inbox-deploy to re-run.
+  push:
+    branches:
+      - cursor/fix-admin-support-inbox-queue-bc18
+    paths:
+      - 'scripts/trigger-support-inbox-deploy'
+      - '.github/workflows/deploy-support-inbox.yml'
 
 jobs:
   deploy:
-    if: github.event.inputs.confirm == 'deploy'
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'deploy')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -49,7 +59,7 @@ jobs:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           FIREBASE_PROJECT: tpp-splendide
         run: |
-          echo "Deploying from ref: ${{ github.event.inputs.ref }}"
+          echo "Deploying SHA: $(git rev-parse HEAD)"
           npx --yes firebase-tools@13 deploy \
             --only functions:createSupportTicket,functions:reopenTicket,functions:addTicketToWorkQueue,functions:submitFeedback,functions:dailySupportInboxBacklogScan,functions:runSupportInboxBacklogScanNow \
             --project "$FIREBASE_PROJECT" \
@@ -57,7 +67,12 @@ jobs:
             --non-interactive \
             --token "$FIREBASE_TOKEN"
 
-      - name: Verify deployed functions
+      - name: Verify production HTTP endpoints
+        run: |
+          chmod +x ./scripts/verify-support-inbox-deploy.sh
+          ./scripts/verify-support-inbox-deploy.sh
+
+      - name: Confirm functions list
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           FIREBASE_PROJECT: tpp-splendide
