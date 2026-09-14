@@ -7,17 +7,20 @@ on:
         description: 'Type deploy to run'
         required: true
         default: ''
+      ref:
+        description: 'Git ref to deploy (branch/SHA). Use the fix branch until it is merged.'
+        required: true
+        default: 'cursor/fix-admin-support-inbox-queue-bc18'
 
 jobs:
   deploy:
     if: github.event.inputs.confirm == 'deploy'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: .
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -46,6 +49,7 @@ jobs:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
           FIREBASE_PROJECT: tpp-splendide
         run: |
+          echo "Deploying from ref: ${{ github.event.inputs.ref }}"
           npx --yes firebase-tools@13 deploy \
             --only functions:createSupportTicket,functions:reopenTicket,functions:addTicketToWorkQueue,functions:submitFeedback,functions:dailySupportInboxBacklogScan,functions:runSupportInboxBacklogScanNow \
             --project "$FIREBASE_PROJECT" \
