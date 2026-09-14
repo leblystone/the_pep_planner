@@ -7631,6 +7631,13 @@ exports.adminRetryScheduledBilling = accountDeletionScheduler.adminRetrySchedule
 exports.adminCancelScheduledDeletion = accountDeletionScheduler.adminCancelScheduledDeletion;
 exports.processScheduledAccountDeletions = accountDeletionScheduler.processScheduledAccountDeletions;
 
+// ==================== SUPPORT INBOX BACKLOG SCAN ====================
+// Daily auto-recovery for tickets/feedback that emailed/numbered but never hit User Reports.
+// Manual Add Missed remains emergency-only; routine backlog should not need human pulls.
+const supportInboxBacklogScan = require('./supportInboxBacklogScan');
+exports.dailySupportInboxBacklogScan = supportInboxBacklogScan.dailySupportInboxBacklogScan;
+exports.runSupportInboxBacklogScanNow = supportInboxBacklogScan.runSupportInboxBacklogScanNow;
+
 // ==================== RESEARCH REMINDER SCHEDULER ====================
 exports.onUserResearchReminderSync = researchReminderScheduler.onUserResearchReminderSync;
 exports.onUserDataResearchReminderSync = researchReminderScheduler.onUserDataResearchReminderSync;

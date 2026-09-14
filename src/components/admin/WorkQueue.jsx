@@ -818,78 +818,36 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     }
   };
 
+  // Emergency on-demand recovery. Daily schedule (dailySupportInboxBacklogScan)
+  // already auto-queues misses — this is for "I need them now" only.
   const runBacklogScan = async () => {
     setBacklogScanning(true);
     setBacklogResults(null);
     try {
-      const firestore = getFirestore();
-      // Build a map: ticketId → { latestLogTimestamp, isMarkedFixed }
-      // Include BOTH open and closed queue rows so "replied after close" is accurate.
-      const logMap = new Map();
-      const considerLog = (item) => {
-        if (!item.ticketId) return;
-        const itemTs = item.timestamp?.toDate?.()?.getTime?.()
-          ?? (typeof item.timestamp === 'number' ? item.timestamp : 0);
-        const fixedAt = item.markedFixedAt?.toDate?.()?.getTime?.()
-          ?? (typeof item.markedFixedAt === 'number' ? item.markedFixedAt : 0);
-        const existing = logMap.get(item.ticketId);
-        const ts = Math.max(itemTs || 0, fixedAt || 0);
-        if (!existing || ts > (existing.ts ?? 0)) {
-          logMap.set(item.ticketId, { ts, markedFixed: !!item.markedFixed });
-        } else if (existing && item.markedFixed === false) {
-          // Prefer an open row when timestamps are equal / close
-          logMap.set(item.ticketId, { ...existing, markedFixed: false });
-        }
-      };
-      for (const item of workQueue) considerLog(item);
-      for (const item of closedQueue) considerLog(item);
-
-      // Scan supportTickets with any activity in last 90 days
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 90);
-      const snap = await getDocs(
-        query(
-          collection(firestore, 'supportTickets'),
-          where('lastMessageAt', '>=', cutoff),
-          orderBy('lastMessageAt', 'desc')
-        )
-      );
-
-      const missed = [];
-      for (const d of snap.docs) {
-        const data = d.data();
-        // Skip fully closed/merged tickets with no open work left
-        if (data.status === 'merged') continue;
-        const lastMsgTs = data.lastMessageAt?.toDate?.()?.getTime() ?? 0;
-        const logEntry = logMap.get(d.id);
-
-        // Missed if: no log at all, OR log is marked fixed and user sent a message after it was fixed
-        const noLog = !logEntry;
-        const repliedAfterClose = logEntry?.markedFixed && lastMsgTs > (logEntry.ts ?? 0);
-
-        if (noLog || repliedAfterClose) {
-          // Check if it's already pending in our queue
-          const alreadyPending = workQueue.some(q => q.ticketId === d.id && !q.markedFixed);
-          if (!alreadyPending) {
-            missed.push({
-              id: d.id,
-              ticketNumber: data.ticketNumber,
-              requestNumbers: data.requestNumbers || [],
-              userEmail: data.userEmail,
-              subject: data.subject,
-              status: data.status,
-              lastMessageAt: data.lastMessageAt,
-              reason: noLog
-                ? 'Never landed in User Reports queue (email may still have been sent)'
-                : 'User replied after ticket was closed in queue',
-            });
-          }
-        }
-      }
-      setBacklogResults(missed);
-      // Results stored silently — panel stays collapsed until manually opened
+      const runScan = httpsCallable(functions, 'runSupportInboxBacklogScanNow');
+      const result = await runScan({ lookbackDays: 90, dryRun: false });
+      const data = result?.data || {};
+      setBacklogResults({
+        recoveredCount: data.recoveredCount || 0,
+        recovered: data.recovered || [],
+        errorCount: data.errorCount || 0,
+        errors: data.errors || [],
+        scannedTickets: data.scannedTickets || 0,
+        scannedFeedback: data.scannedFeedback || 0,
+        finishedAt: data.finishedAt || null,
+        autoQueued: true,
+      });
+      window.dispatchEvent(new CustomEvent('tpp:toast', {
+        detail: {
+          message: data.recoveredCount
+            ? `Backlog scan recovered ${data.recoveredCount} report(s) into User Reports ✓`
+            : 'Backlog scan complete — nothing missing',
+          type: 'success',
+        },
+      }));
     } catch (err) {
-      setBacklogResults({ error: err?.message || 'Scan failed' });
+      const msg = err?.message || String(err);
+      setBacklogResults({ error: msg.replace(/^FirebaseError:\s*/i, '') });
     } finally {
       setBacklogScanning(false);
     }
@@ -2171,9 +2129,6 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       backlogScanning={backlogScanning}
       runBacklogScan={runBacklogScan}
       backlogResults={backlogResults}
-      expandedBacklogItems={expandedBacklogItems}
-      toggleBacklogItem={toggleBacklogItem}
-      backlogMessages={backlogMessages}
       showAddMissed={showAddMissed}
       setShowAddMissed={setShowAddMissed}
       addMissedSearch={addMissedSearch}
@@ -2192,13 +2147,6 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       runCommitAudit={runCommitAudit}
       commitAuditResults={commitAuditResults}
       setCommitAuditResults={setCommitAuditResults}
-      workQueue={workQueue}
-      linkingNoMatchSha={linkingNoMatchSha}
-      setLinkingNoMatchSha={setLinkingNoMatchSha}
-      selectedLogIdForNoMatch={selectedLogIdForNoMatch}
-      setSelectedLogIdForNoMatch={setSelectedLogIdForNoMatch}
-      linkNoMatchCommitToTicket={linkNoMatchCommitToTicket}
-      openTicket={openTicket}
     />
   );
 
