@@ -84,6 +84,8 @@ export default function LogOneOffDoseModal({
   const [savedDose, setSavedDose] = useState(null);
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);
   const [showSitePicker, setShowSitePicker] = useState(false);
+  const [sitePickerMounted, setSitePickerMounted] = useState(false);
+  const [sitePickerExpanded, setSitePickerExpanded] = useState(false);
   // Protocol that already exists for the logged peptide
   const [existingProtocol, setExistingProtocol] = useState(null);
 
@@ -95,8 +97,27 @@ export default function LogOneOffDoseModal({
     setIsSaving(false);
     setShowNameSuggestions(false);
     setShowSitePicker(false);
+    setSitePickerMounted(false);
+    setSitePickerExpanded(false);
     setExistingProtocol(null);
   }, [open, defaultDateKey, prefilledProtocol]);
+
+  // Mount closed, then expand next frame so height/opacity can actually animate in.
+  useEffect(() => {
+    if (!showSitePicker) {
+      setSitePickerExpanded(false);
+      return undefined;
+    }
+    setSitePickerMounted(true);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setSitePickerExpanded(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [showSitePicker]);
 
   const nameSuggestions = useMemo(() => {
     const names = new Set();
@@ -251,6 +272,8 @@ export default function LogOneOffDoseModal({
     }));
     if (isInjectionSiteTrackingEnabled() && isInjectionDelivery(id)) {
       setShowSitePicker(true);
+    } else {
+      setShowSitePicker(false);
     }
   };
 
@@ -346,7 +369,7 @@ export default function LogOneOffDoseModal({
     <BottomSheet
       open={open}
       onClose={handleClose}
-      title="Log one-off dose"
+      title="As Needed"
       titleExtra={<ExpandableTooltip content={ONE_OFF_DOSE_TOOLTIP} theme={theme} position="left" />}
       theme={theme}
       maxHeight="90vh"
@@ -423,18 +446,9 @@ export default function LogOneOffDoseModal({
         </div>
 
         {/* When + how */}
-        <div
-          className="rounded-xl p-3.5 space-y-2.5"
-          style={{
-            backgroundColor: theme?.isDark ? 'rgba(255,255,255,0.04)' : `${theme?.primary || '#445952'}0a`,
-            border: `1px solid ${theme?.isDark ? 'rgba(255,255,255,0.06)' : `${theme?.primary || '#445952'}14`}`,
-          }}
-        >
-          <div className="grid grid-cols-2 gap-2.5 items-end">
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 gap-2.5 items-stretch">
             <div className="min-w-0">
-              <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: theme?.textLight }}>
-                Date
-              </label>
               <GlassmorphismDatePicker
                 value={form.dateKey}
                 onChange={(v) => setForm((prev) => ({ ...prev, dateKey: v }))}
@@ -442,23 +456,26 @@ export default function LogOneOffDoseModal({
                 outlined
               />
             </div>
-            <div className="min-w-0">
-              <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: theme?.textLight }}>
-                Time
-              </label>
+            <div className="min-w-0 flex">
               <div
-                className="flex w-full rounded-lg p-1 gap-0.5"
-                style={{ backgroundColor: theme?.isDark ? '#1a2028' : 'rgba(255,255,255,0.85)' }}
+                className="flex w-full flex-1 rounded-lg p-1 gap-0.5"
+                style={{
+                  backgroundColor: theme?.isDark ? 'rgba(255,255,255,0.08)' : `${theme?.primary || '#7F9E95'}14`,
+                  border: `1px solid ${theme?.isDark ? 'rgba(255,255,255,0.1)' : `${theme?.primary || '#7F9E95'}28`}`,
+                  boxShadow: theme?.isDark
+                    ? 'inset 0 1px 2px rgba(0,0,0,0.25)'
+                    : 'inset 0 1px 2px rgba(0,0,0,0.04)',
+                }}
               >
                 {['AM', 'PM'].map((slot) => (
                   <button
                     key={slot}
                     type="button"
                     onClick={() => setForm((prev) => ({ ...prev, timeSlot: slot }))}
-                    className="flex-1 px-3 py-2 text-xs font-bold rounded-md"
+                    className="flex-1 px-3 text-sm font-bold rounded-md self-stretch"
                     style={{
                       backgroundColor: form.timeSlot === slot ? (theme?.primaryDark || theme?.primary || '#445952') : 'transparent',
-                      color: form.timeSlot === slot ? '#fff' : theme?.textLight,
+                      color: form.timeSlot === slot ? '#fff' : theme?.text,
                     }}
                   >
                     {slot}
@@ -469,9 +486,6 @@ export default function LogOneOffDoseModal({
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: theme?.textLight }}>
-              Delivery
-            </label>
             <div className="grid grid-cols-2 gap-1.5">
               {DELIVERY_OPTIONS.map(({ id, label, Icon }) => {
                 const selected = form.deliveryMethod === id;
@@ -480,7 +494,7 @@ export default function LogOneOffDoseModal({
                     key={id}
                     type="button"
                     onClick={() => handleDeliverySelect(id)}
-                    className="flex flex-col items-center justify-center gap-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                    className="flex flex-row items-center justify-center gap-2.5 px-3 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all active:scale-95"
                     style={{
                       backgroundColor: selected
                         ? (theme?.primaryDark || theme?.primary || '#445952')
@@ -494,27 +508,71 @@ export default function LogOneOffDoseModal({
                         : 'inset 0 1px 3px rgba(0,0,0,0.06)',
                     }}
                   >
-                    <Icon size={18} weight="duotone" />
+                    <Icon size={28} weight="duotone" />
                     <span>{label}</span>
                   </button>
                 );
               })}
             </div>
+
+            {sitePickerMounted && (
+              <div
+                className="grid"
+                style={{
+                  gridTemplateRows: sitePickerExpanded ? '1fr' : '0fr',
+                  opacity: sitePickerExpanded ? 1 : 0,
+                  marginTop: sitePickerExpanded ? 8 : 0,
+                  transition:
+                    'grid-template-rows 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 280ms ease-out, margin-top 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+                }}
+                onTransitionEnd={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.propertyName !== 'grid-template-rows') return;
+                  if (!showSitePicker) setSitePickerMounted(false);
+                }}
+              >
+                <div className="overflow-hidden min-h-0">
+                  <div
+                    style={{
+                      transform: sitePickerExpanded ? 'translateY(0)' : 'translateY(-6px)',
+                      transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    }}
+                  >
+                    <InjectionSiteSelector
+                      taskName={form.peptideName?.trim() || 'One-off dose'}
+                      task={null}
+                      theme={theme}
+                      variant="inline"
+                      isVisible
+                      onConfirm={(site) => {
+                        setShowSitePicker(false);
+                        setForm((prev) => ({ ...prev, injectionSite: site || '' }));
+                      }}
+                      onCancel={() => setShowSitePicker(false)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!showSitePicker && !sitePickerMounted && form.injectionSite ? (
+              <button
+                type="button"
+                onClick={() => setShowSitePicker(true)}
+                className="mt-2 w-full text-left text-xs font-medium px-2.5 py-2 rounded-lg transition-opacity hover:opacity-85"
+                style={{
+                  color: theme?.primaryDark || theme?.primary,
+                  backgroundColor: `${theme?.primary || '#445952'}14`,
+                  border: `1px solid ${theme?.primary || '#445952'}28`,
+                }}
+              >
+                Site: {form.injectionSite}
+                <span className="opacity-60 font-normal"> · tap to change</span>
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
-
-      <InjectionSiteSelector
-        taskName={form.peptideName?.trim() || 'One-off dose'}
-        task={null}
-        theme={theme}
-        isVisible={showSitePicker}
-        onConfirm={(site) => {
-          setShowSitePicker(false);
-          setForm((prev) => ({ ...prev, injectionSite: site || '' }));
-        }}
-        onCancel={() => setShowSitePicker(false)}
-      />
     </BottomSheet>
   );
 }

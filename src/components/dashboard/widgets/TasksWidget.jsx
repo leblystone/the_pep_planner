@@ -650,7 +650,7 @@ const AsNeededSection = ({ protocols, theme, onLog, onRemoveAsNeeded }) => {
     };
   }, [menuOpenId]);
 
-  if (!protocols || protocols.length === 0) return null;
+  const list = Array.isArray(protocols) ? protocols : [];
   return (
     <div className="mt-3">
       <div className="flex items-center gap-1.5 mb-2">
@@ -665,8 +665,9 @@ const AsNeededSection = ({ protocols, theme, onLog, onRemoveAsNeeded }) => {
           controlSize={24}
         />
       </div>
+      {list.length > 0 ? (
       <div className="flex flex-col">
-        {protocols.map((protocol, index) => {
+        {list.map((protocol, index) => {
           const pep = Array.isArray(protocol.peptides) ? protocol.peptides[0] : null;
           const displayName = pep?.name || protocol.name || 'As Needed';
           const doseLabel = pep?.dosage?.amount
@@ -674,7 +675,7 @@ const AsNeededSection = ({ protocols, theme, onLog, onRemoveAsNeeded }) => {
             : '';
           const lastOn = formatLastDoseOn(getLastAsNeededDoseDateKey(protocol, oneOffDoses));
           const isMenuOpen = menuOpenId === protocol.id;
-          const isLast = index === protocols.length - 1;
+          const isLast = index === list.length - 1;
           return (
             <div
               key={protocol.id}
@@ -784,6 +785,7 @@ const AsNeededSection = ({ protocols, theme, onLog, onRemoveAsNeeded }) => {
           );
         })}
       </div>
+      ) : null}
     </div>
   );
 };
@@ -879,15 +881,6 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
         </div>
         
         <div className="flex-1 p-2 sm:p-4 flex flex-col gap-3 min-h-0 overflow-y-auto">
-          {/* As Needed protocols — always visible even when nothing else is scheduled */}
-          {Array.isArray(asNeededProtocols) && asNeededProtocols.length > 0 && (
-            <AsNeededSection
-              protocols={asNeededProtocols}
-              theme={theme}
-              onLog={onLogAsNeeded}
-              onRemoveAsNeeded={onRemoveAsNeeded}
-            />
-          )}
           <div className="flex flex-col items-center justify-center gap-3 flex-1">
           {!showStartOptions ? (
             <>
@@ -953,6 +946,12 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
             </div>
           )}
           </div>
+          <AsNeededSection
+            protocols={asNeededProtocols}
+            theme={theme}
+            onLog={onLogAsNeeded}
+            onRemoveAsNeeded={onRemoveAsNeeded}
+          />
           <LogDoseFooter theme={theme} onClick={onOpenLogOneOff} />
         </div>
         
@@ -1005,14 +1004,12 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
             onClearCatchUp={onClearCatchUp}
             scheduleActionsDisabled={scheduleActionsDisabled}
           />
-          {Array.isArray(asNeededProtocols) && asNeededProtocols.length > 0 && (
-            <AsNeededSection
-              protocols={asNeededProtocols}
-              theme={theme}
-              onLog={onLogAsNeeded}
-              onRemoveAsNeeded={onRemoveAsNeeded}
-            />
-          )}
+          <AsNeededSection
+            protocols={asNeededProtocols}
+            theme={theme}
+            onLog={onLogAsNeeded}
+            onRemoveAsNeeded={onRemoveAsNeeded}
+          />
           <LogDoseFooter theme={theme} onClick={onOpenLogOneOff} />
         </div>
         
@@ -1083,14 +1080,12 @@ const TasksWidget = ({ widget, theme, tasks, onToggle, onOpenQuickStart, onOpenF
             onClearCatchUp={onClearCatchUp}
             scheduleActionsDisabled={scheduleActionsDisabled}
           />
-          {Array.isArray(asNeededProtocols) && asNeededProtocols.length > 0 && (
-            <AsNeededSection
-              protocols={asNeededProtocols}
-              theme={theme}
-              onLog={onLogAsNeeded}
-              onRemoveAsNeeded={onRemoveAsNeeded}
-            />
-          )}
+          <AsNeededSection
+            protocols={asNeededProtocols}
+            theme={theme}
+            onLog={onLogAsNeeded}
+            onRemoveAsNeeded={onRemoveAsNeeded}
+          />
         </div>
         <LogDoseFooter theme={theme} onClick={onOpenLogOneOff} />
         

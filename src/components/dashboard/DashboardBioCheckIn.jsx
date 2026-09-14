@@ -206,15 +206,20 @@ export default function DashboardBioCheckIn({ theme, metrics, onCommit, isReadOn
           <ClipboardText size={22} weight="duotone" style={{ color: theme.primary }} />
         </h3>
         <p className="text-sm" style={{ color: theme.textLight }}>
-          Saved for today — charts and Bio-Metrics will pick this up.
+          Saved for today! Insights will chart this.
         </p>
         <button
           type="button"
           onClick={restart}
-          className="w-full py-2.5 rounded-xl text-xs font-semibold touch-manipulation transition-opacity hover:opacity-95"
-          style={{ backgroundColor: `${theme.primary}22`, color: theme.primary }}
+          className="self-center px-4 py-2.5 rounded-xl text-xs font-semibold touch-manipulation transition-opacity hover:opacity-95 border"
+          style={{
+            backgroundColor: `${theme.primary}22`,
+            color: theme.primaryDark || theme.primary,
+            borderColor: `${theme.primary}40`,
+            boxShadow: `0 1px 3px ${theme.primary}28, inset 0 1px 0 rgba(255,255,255,0.65)`,
+          }}
         >
-          Update check-in
+          Update Check-In
         </button>
       </div>
     );

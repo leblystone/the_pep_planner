@@ -141,13 +141,24 @@ function BodyOutlineSvg({ theme }) {
   );
 }
 
-export default function InjectionSiteSelector({ taskName, task, onConfirm, onCancel, theme, isVisible }) {
+export default function InjectionSiteSelector({
+  taskName,
+  task,
+  onConfirm,
+  onCancel,
+  theme,
+  isVisible,
+  /** `modal` = full glass overlay (default). `inline` = compact panel for nested sheets. */
+  variant = 'modal',
+}) {
   const [selectedSite,       setSelectedSite]       = useState('');
   const [customSite,         setCustomSite]         = useState('');
   const [suggestions,        setSuggestions]        = useState([]);
   const [hasCheckedTracking, setHasCheckedTracking] = useState(false);
   const [viewMode,           setViewMode]           = useState('front');
   const [showOther,          setShowOther]          = useState(false);
+
+  const isInline = variant === 'inline';
 
   useEffect(() => {
     if (isVisible && !hasCheckedTracking && !isInjectionSiteTrackingEnabled()) {
@@ -214,6 +225,234 @@ export default function InjectionSiteSelector({ taskName, task, onConfirm, onCan
     };
   };
 
+  const bodyMapMax = isInline ? 150 : 180;
+  const markerBase = isInline ? 26 : 30;
+  const markerActive = isInline ? 32 : 36;
+
+  const pickerBody = (
+    <>
+      {!showOther ? (
+        <div className={`${isInline ? 'px-3 pt-2 pb-1' : 'px-5 pt-3 pb-2'} space-y-2.5`}>
+          <div
+            className="flex rounded-xl p-0.5"
+            style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}
+          >
+            {[{ key: 'front', label: '▸ Front' }, { key: 'back', label: '◂ Back' }].map(v => (
+              <button
+                key={v.key}
+                type="button"
+                onClick={() => { setViewMode(v.key); setSelectedSite(''); }}
+                className="flex-1 py-1.5 rounded-lg text-xs font-bold transition-all"
+                style={{
+                  backgroundColor: viewMode === v.key ? (theme.isDark ? 'rgba(255,255,255,0.14)' : '#fff') : 'transparent',
+                  color:           viewMode === v.key ? theme.text : theme.textLight,
+                  boxShadow:       viewMode === v.key ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                }}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            style={{
+              position:    'relative',
+              width:       '100%',
+              maxWidth:    bodyMapMax,
+              margin:      '0 auto',
+              aspectRatio: '512 / 512',
+            }}
+          >
+            <BodyOutlineSvg theme={theme} />
+            {zones.map(zone => {
+              const { bg, border, icon, shadow } = markerStyle(zone.id);
+              const isSelected = selectedSite === zone.id;
+
+              return (
+                <button
+                  key={zone.id + viewMode}
+                  type="button"
+                  onClick={() => setSelectedSite(zone.id)}
+                  aria-label={zone.label}
+                  style={{
+                    position:        'absolute',
+                    left:            `${zone.x}%`,
+                    top:             `${zone.y}%`,
+                    transform:       'translate(-50%, -50%)',
+                    zIndex:          10,
+                    width:           isSelected ? markerActive : markerBase,
+                    height:          isSelected ? markerActive : markerBase,
+                    borderRadius:    '50%',
+                    backgroundColor: bg,
+                    border:          `2px solid ${border}`,
+                    display:         'flex',
+                    alignItems:      'center',
+                    justifyContent:  'center',
+                    cursor:          'pointer',
+                    boxShadow:       shadow,
+                    transition:      'all 0.2s ease',
+                  }}
+                >
+                  <ZoneIcon zoneId={zone.id} color={icon} selected={isSelected} />
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-center min-h-[24px] flex items-center justify-center">
+            {selectedSite ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold"
+                style={{ backgroundColor: theme.primary + '18', color: theme.primary }}
+              >
+                ✓ {toTitleCase(selectedSite)}
+                {formatLastUsed(siteRecency[selectedSite]) && (
+                  <span className="text-[10px] font-normal opacity-70">
+                    · {formatLastUsed(siteRecency[selectedSite])}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className="text-[11px] italic" style={{ color: theme.textLight, opacity: 0.6 }}>
+                Tap a zone to select
+              </span>
+            )}
+          </div>
+
+          {!isInline && (
+            <div className="flex items-center justify-center gap-5 pb-1">
+              {[{ color: '#f59e0b', label: 'Used recently' }, { color: '#10b981', label: 'This week' }].map(({ color, label }) => (
+                <div key={label} className="flex items-center gap-1.5 text-[10px]" style={{ color: theme.textLight }}>
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color, opacity: 0.85 }} />
+                  {label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className={`${isInline ? 'px-3 pt-2 pb-1' : 'px-5 pt-4 pb-2'} space-y-3`}>
+          <p className="text-sm font-semibold" style={{ color: theme.text }}>Custom injection site</p>
+          <input
+            type="text"
+            value={customSite}
+            onChange={e => setCustomSite(e.target.value)}
+            placeholder="e.g. Deltoid, SubQ belly..."
+            className="w-full px-3 py-2.5 rounded-xl text-sm"
+            style={{
+              border:          `1.5px solid ${theme.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'}`,
+              backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.85)',
+              color:           theme.text,
+              outline:         'none',
+            }}
+            autoFocus
+          />
+          {suggestions.length > 0 && (
+            <div>
+              <p className="flex items-center gap-1 text-[10px] font-semibold mb-2" style={{ color: theme.textLight }}>
+                <Clock size={10} /> Recent
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.map((s, i) => {
+                  const lu = formatLastUsed(s.lastUsed);
+                  const active = customSite.toLowerCase() === s.site.toLowerCase();
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setCustomSite(s.site)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all"
+                      style={{
+                        borderColor:     active ? theme.primary : theme.border,
+                        color:           theme.text,
+                        backgroundColor: active ? theme.primary + '18' : 'transparent',
+                      }}
+                    >
+                      {toTitleCase(s.site)}{lu ? ` · ${lu}` : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className={`flex justify-center ${isInline ? 'pb-2 pt-0.5' : 'pb-4 pt-1'}`}>
+        <button
+          type="button"
+          onClick={() => { setShowOther(!showOther); setSelectedSite(''); setCustomSite(''); }}
+          className="text-[11px] font-medium underline underline-offset-2 hover:opacity-60 transition-opacity"
+          style={{ color: theme.textLight }}
+        >
+          {showOther ? '← Use Body Map' : 'Custom / Other Site'}
+        </button>
+      </div>
+    </>
+  );
+
+  const footer = (
+    <div
+      className={`flex-shrink-0 flex gap-2 ${isInline ? 'px-3 py-2.5' : 'px-5 py-3'}`}
+      style={{ borderTop: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'}` }}
+    >
+      <button
+        type="button"
+        onClick={handleSkip}
+        className="flex-1 py-2 rounded-xl text-xs font-semibold border transition-all hover:opacity-80"
+        style={{ borderColor: theme.border, color: theme.textLight }}
+      >
+        Skip
+      </button>
+      <button
+        type="button"
+        onClick={handleConfirm}
+        disabled={!isFormValid()}
+        className="flex-1 py-2 rounded-xl text-xs font-bold transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{
+          backgroundColor: theme.primary,
+          color: theme.textOnPrimary,
+          boxShadow: isInline
+            ? `0 1px 3px ${theme.primary}28, inset 0 1px 0 rgba(255,255,255,0.35)`
+            : (theme.isDark
+              ? '0 2px 8px rgba(0,0,0,0.45), 0 4px 16px rgba(0,0,0,0.35)'
+              : '0 2px 6px rgba(0,0,0,0.12), 0 4px 14px rgba(0,0,0,0.14)'),
+        }}
+      >
+        Confirm Site
+      </button>
+    </div>
+  );
+
+  if (isInline) {
+    return (
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: theme.isDark ? 'rgba(255,255,255,0.04)' : `${theme.primary || '#445952'}0a`,
+          border: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.08)' : `${theme.primary || '#445952'}22`}`,
+        }}
+      >
+        <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1">
+          <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: theme.textLight }}>
+            Injection site
+          </p>
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="p-1 rounded-md transition-opacity hover:opacity-60"
+            style={{ color: theme.textLight }}
+            aria-label="Close site picker"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        {pickerBody}
+        {footer}
+      </div>
+    );
+  }
+
   const modal = (
     <div
       className="fixed inset-0 flex items-center justify-center"
@@ -230,7 +469,6 @@ export default function InjectionSiteSelector({ taskName, task, onConfirm, onCan
         style={{ width: '92vw', maxWidth: 370, maxHeight: '92vh' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* ── HEADER ── */}
         <div
           className="flex items-start justify-between flex-shrink-0 px-5 pt-4 pb-3"
           style={{ borderBottom: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'}` }}
@@ -241,204 +479,16 @@ export default function InjectionSiteSelector({ taskName, task, onConfirm, onCan
             </p>
             <h4 className="font-bold text-sm" style={{ color: theme.text }}>{taskName}</h4>
           </div>
-          <button onClick={handleCancel} className="p-1.5 transition-opacity hover:opacity-60 mt-0.5" style={{ color: theme.textLight }}>
+          <button type="button" onClick={handleCancel} className="p-1.5 transition-opacity hover:opacity-60 mt-0.5" style={{ color: theme.textLight }}>
             <X size={15} />
           </button>
         </div>
 
-        {/* ── BODY ── */}
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {!showOther ? (
-            <div className="px-5 pt-3 pb-2 space-y-3">
-
-              {/* Front / Back toggle */}
-              <div
-                className="flex rounded-xl p-0.5"
-                style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}
-              >
-                {[{ key: 'front', label: '▸ Front' }, { key: 'back', label: '◂ Back' }].map(v => (
-                  <button
-                    key={v.key}
-                    onClick={() => { setViewMode(v.key); setSelectedSite(''); }}
-                    className="flex-1 py-1.5 rounded-lg text-xs font-bold transition-all"
-                    style={{
-                      backgroundColor: viewMode === v.key ? (theme.isDark ? 'rgba(255,255,255,0.14)' : '#fff') : 'transparent',
-                      color:           viewMode === v.key ? theme.text : theme.textLight,
-                      boxShadow:       viewMode === v.key ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
-                    }}
-                  >
-                    {v.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* ── BODY MAP ── */}
-              <div
-                style={{
-                  position:    'relative',
-                  width:       '100%',
-                  maxWidth:    180,
-                  margin:      '0 auto',
-                  aspectRatio: '512 / 512',
-                }}
-              >
-                <BodyOutlineSvg theme={theme} />
-
-                {/* Syringe zone markers — static, no bouncing */}
-                {zones.map(zone => {
-                  const { bg, border, icon, shadow } = markerStyle(zone.id);
-                  const isSelected = selectedSite === zone.id;
-
-                  return (
-                    <button
-                      key={zone.id + viewMode}
-                      onClick={() => setSelectedSite(zone.id)}
-                      aria-label={zone.label}
-                      style={{
-                        position:        'absolute',
-                        left:            `${zone.x}%`,
-                        top:             `${zone.y}%`,
-                        transform:       'translate(-50%, -50%)',
-                        zIndex:          10,
-                        width:           isSelected ? 36 : 30,
-                        height:          isSelected ? 36 : 30,
-                        borderRadius:    '50%',
-                        backgroundColor: bg,
-                        border:          `2px solid ${border}`,
-                        display:         'flex',
-                        alignItems:      'center',
-                        justifyContent:  'center',
-                        cursor:          'pointer',
-                        boxShadow:       shadow,
-                        transition:      'all 0.2s ease',
-                      }}
-                    >
-                      <ZoneIcon zoneId={zone.id} color={icon} selected={isSelected} />
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Selection feedback */}
-              <div className="text-center min-h-[28px] flex items-center justify-center">
-                {selectedSite ? (
-                  <span
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold"
-                    style={{ backgroundColor: theme.primary + '18', color: theme.primary }}
-                  >
-                    ✓ {toTitleCase(selectedSite)}
-                    {formatLastUsed(siteRecency[selectedSite]) && (
-                      <span className="text-[10px] font-normal opacity-70">
-                        · {formatLastUsed(siteRecency[selectedSite])}
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-xs italic" style={{ color: theme.textLight, opacity: 0.6 }}>
-                    Tap a zone to select an injection site
-                  </span>
-                )}
-              </div>
-
-              {/* Legend */}
-              <div className="flex items-center justify-center gap-5 pb-1">
-                {[{ color: '#f59e0b', label: 'Used recently' }, { color: '#10b981', label: 'This week' }].map(({ color, label }) => (
-                  <div key={label} className="flex items-center gap-1.5 text-[10px]" style={{ color: theme.textLight }}>
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color, opacity: 0.85 }} />
-                    {label}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            /* ── CUSTOM INPUT ── */
-            <div className="px-5 pt-4 pb-2 space-y-3">
-              <p className="text-sm font-semibold" style={{ color: theme.text }}>Custom injection site</p>
-              <input
-                type="text"
-                value={customSite}
-                onChange={e => setCustomSite(e.target.value)}
-                placeholder="e.g. Deltoid, SubQ belly..."
-                className="w-full px-3 py-3 rounded-xl text-sm"
-                style={{
-                  border:          `1.5px solid ${theme.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'}`,
-                  backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.85)',
-                  color:           theme.text,
-                  outline:         'none',
-                }}
-                onFocus={e => { e.target.style.borderColor = theme.primary; e.target.style.boxShadow = `0 0 0 3px ${theme.primary}22`; }}
-                onBlur={e => { e.target.style.borderColor = theme.isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'; e.target.style.boxShadow = 'none'; }}
-                autoFocus
-              />
-              {suggestions.length > 0 && (
-                <div>
-                  <p className="flex items-center gap-1 text-[10px] font-semibold mb-2" style={{ color: theme.textLight }}>
-                    <Clock size={10} /> Recent
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {suggestions.map((s, i) => {
-                      const lu = formatLastUsed(s.lastUsed);
-                      const active = customSite.toLowerCase() === s.site.toLowerCase();
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => setCustomSite(s.site)}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all"
-                          style={{
-                            borderColor:     active ? theme.primary : theme.border,
-                            color:           theme.text,
-                            backgroundColor: active ? theme.primary + '18' : 'transparent',
-                          }}
-                        >
-                          {toTitleCase(s.site)}{lu ? ` · ${lu}` : ''}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Toggle body map ↔ custom */}
-          <div className="flex justify-center pb-4 pt-1">
-            <button
-              onClick={() => { setShowOther(!showOther); setSelectedSite(''); setCustomSite(''); }}
-              className="text-xs font-medium underline underline-offset-2 hover:opacity-60 transition-opacity"
-              style={{ color: theme.textLight }}
-            >
-              {showOther ? '← Use Body Map' : 'Custom / Other Site'}
-            </button>
-          </div>
+          {pickerBody}
         </div>
 
-        {/* ── FOOTER ── */}
-        <div
-          className="flex-shrink-0 flex gap-2 px-5 py-3"
-          style={{ borderTop: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'}` }}
-        >
-          <button
-            onClick={handleSkip}
-            className="flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all hover:opacity-80"
-            style={{ borderColor: theme.border, color: theme.textLight }}
-          >
-            Skip
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={!isFormValid()}
-            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{
-              backgroundColor: theme.primary,
-              color: theme.textOnPrimary,
-              boxShadow: theme.isDark
-                ? '0 2px 8px rgba(0,0,0,0.45), 0 4px 16px rgba(0,0,0,0.35)'
-                : '0 2px 6px rgba(0,0,0,0.12), 0 4px 14px rgba(0,0,0,0.14)',
-            }}
-          >
-            Confirm Site
-          </button>
-        </div>
+        {footer}
       </div>
     </div>
   );

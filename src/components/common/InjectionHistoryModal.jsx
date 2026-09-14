@@ -39,7 +39,18 @@ const ZONE_POSITIONS = {
     'right rear':        { x: 60, y: 64 },
 };
 
-const PALETTE_SIZE = 24;
+/** Collapse near-duplicate outline spots so the heatmap never stacks two dots. */
+const HEATMAP_ZONE_MERGE = {
+    'left lower back': 'left abdomen',
+    'right lower back': 'right abdomen',
+    'left rear': 'left thigh',
+    'right rear': 'right thigh',
+};
+
+function toHeatmapZone(zone) {
+    if (!zone) return null;
+    return HEATMAP_ZONE_MERGE[zone] || zone;
+}
 
 function clamp01(n) {
     return Math.max(0, Math.min(1, n));
@@ -70,97 +81,23 @@ function mixRgb(a, b, t) {
     };
 }
 
-function rgbToHsl(r, g, b) {
-    r /= 255;
-    g /= 255;
-    b /= 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0;
-    let s = 0;
-    const l = (max + min) / 2;
-    if (max !== min) {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-        else if (max === g) h = ((b - r) / d + 2) / 6;
-        else h = ((r - g) / d + 4) / 6;
-    }
-    return { h: h * 360, s, l };
-}
-
-function hslToRgb(h, s, l) {
-    const H = ((h % 360) + 360) % 360;
-    const c = (1 - Math.abs(2 * l - 1)) * clamp01(s);
-    const x = c * (1 - Math.abs(((H / 60) % 2) - 1));
-    const m = l - c / 2;
-    let rp = 0;
-    let gp = 0;
-    let bp = 0;
-    if (H < 60) [rp, gp, bp] = [c, x, 0];
-    else if (H < 120) [rp, gp, bp] = [x, c, 0];
-    else if (H < 180) [rp, gp, bp] = [0, c, x];
-    else if (H < 240) [rp, gp, bp] = [0, x, c];
-    else if (H < 300) [rp, gp, bp] = [x, 0, c];
-    else [rp, gp, bp] = [c, 0, x];
-    return { r: (rp + m) * 255, g: (gp + m) * 255, b: (bp + m) * 255 };
-}
-
-function hslToHex(h, s, l) {
-    const { r, g, b } = hslToRgb(h, clamp01(s), clamp01(l));
-    return rgbToHex(r, g, b);
-}
-
-/** 24 muted greens / greiges / warm greys — all blended from the active theme. */
-function buildThemeDotPalette(theme) {
-    const fallback = { r: 127, g: 158, b: 149 };
-    const P = hexToRgb(theme.primary) || fallback;
-    const D = hexToRgb(theme.primaryDark || theme.primary) || P;
-    const L = hexToRgb(theme.primaryLight || theme.primary) || P;
-    const TL = hexToRgb(theme.textLight) || hexToRgb('#8A8077') || P;
-    const BR = hexToRgb(theme.border) || hexToRgb('#DDE6DE') || P;
-    const TX = hexToRgb(theme.text) || hexToRgb('#3A3A3A') || P;
-    const BG = hexToRgb(theme.secondary || theme.background) || BR;
-    // Soft neutral anchors (sage mist, warm stone, cool pebble) — blend with theme primary
-    const MIST = hexToRgb('#A8B0A4') || TL;
-    const STONE = hexToRgb('#C4BCB2') || BR;
-    const PEBBLE = hexToRgb('#9BA39E') || TL;
-
-    const recipes = [];
-    const partners = [TL, BR, TX, BG, MIST, STONE, PEBBLE, D, L];
-    const blend = (a, b, t) => {
-        const m = mixRgb(a, b, clamp01(t));
-        return rgbToHex(m.r, m.g, m.b);
-    };
-    for (let i = 0; i < PALETTE_SIZE; i++) {
-        const partner = partners[i % partners.length];
-        const baseT = 0.12 + ((i * 13) % 9) / 100 * 4.2;
-        const jitter = (i % 4) * 0.045;
-        let hex = blend(P, partner, baseT + jitter);
-        const rgb = hexToRgb(hex);
-        if (rgb) {
-            let { h, s, l } = rgbToHsl(rgb.r, rgb.g, rgb.b);
-            const dh = ((i % 11) - 5) * 2.4 + Math.sin(i * 0.85) * 2;
-            const ds = Math.cos(i * 1.05) * 0.035;
-            const dl = ((i % 9) - 4) * 0.022 + (i / PALETTE_SIZE) * 0.06;
-            h += dh;
-            s = clamp01(s * (0.88 + (i % 6) * 0.028) + ds);
-            s = theme.isDark ? clamp01(Math.min(s * 1.05, 0.42)) : clamp01(Math.min(s * 1.02, 0.38));
-            l = clamp01(l + dl + (theme.isDark ? 0.1 : -0.03));
-            if (theme.isDark) l = clamp01(Math.max(l, 0.44));
-            else l = clamp01(Math.min(Math.max(l, 0.24), 0.58));
-            hex = hslToHex(h, s, l);
-        }
-        recipes.push(hex);
-    }
-    return recipes;
-}
-
 function themeOutlineStroke(theme) {
     const P = hexToRgb(theme.primary);
     if (!P) return theme.isDark ? 'rgba(255,255,255,0.22)' : 'rgba(47,59,58,0.16)';
     const a = theme.isDark ? 0.38 : 0.28;
     return `rgba(${P.r},${P.g},${P.b},${a})`;
+}
+
+/** Frequency heatmap: 0 = light (less used), 1 = dark (more used). */
+function heatColor(theme, intensity01) {
+    const P = hexToRgb(theme.primary) || { r: 127, g: 158, b: 149 };
+    const D = hexToRgb(theme.primaryDark || theme.primary) || P;
+    const white = { r: 255, g: 255, b: 255 };
+    const light = theme.isDark
+        ? mixRgb(P, white, 0.5)
+        : mixRgb(P, white, 0.72);
+    const m = mixRgb(light, D, clamp01(intensity01));
+    return rgbToHex(m.r, m.g, m.b);
 }
 
 function normalizeSiteToZone(site) {
@@ -197,6 +134,11 @@ function BodyOutlineSvg({ theme }) {
     );
 }
 
+function formatZoneLabel(zone) {
+    if (!zone) return '';
+    return zone.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // ─── Site Map insights modal ───────────────────────────────────────────────────
 
 function SiteMapBody({ history, theme, activeDot, setActiveDot }) {
@@ -224,30 +166,51 @@ function SiteMapBody({ history, theme, activeDot, setActiveDot }) {
         });
     }, [history, taskStats]);
 
-    const dotPalette = useMemo(
-        () => buildThemeDotPalette(theme),
-        [theme.primary, theme.primaryDark, theme.primaryLight, theme.textLight, theme.border, theme.text, theme.secondary, theme.background, theme.isDark]
-    );
+    const zoneCounts = useMemo(() => {
+        const counts = {};
+        for (const r of history) {
+            const zone = toHeatmapZone(normalizeSiteToZone(r.injectionSite));
+            if (!zone) continue;
+            counts[zone] = (counts[zone] || 0) + 1;
+        }
+        return counts;
+    }, [history]);
 
-    const taskColor = (name) => dotPalette[taskNames.indexOf(name) % dotPalette.length];
+    const heatScale = useMemo(() => {
+        const vals = Object.values(zoneCounts);
+        if (vals.length === 0) return { min: 0, max: 1 };
+        return { min: Math.min(...vals), max: Math.max(...vals) };
+    }, [zoneCounts]);
 
-    const zoneGroups = {};
-    for (const name of taskNames) {
-        const zone = taskStats[name]?.latest?.zone;
-        if (!zone) continue;
-        if (!zoneGroups[zone]) zoneGroups[zone] = [];
-        zoneGroups[zone].push(name);
-    }
+    const intensityFor = (count) => {
+        const { min, max } = heatScale;
+        if (max <= min) return 0.65;
+        return (count - min) / (max - min);
+    };
 
-    const dots = [];
-    for (const [zone, names] of Object.entries(zoneGroups)) {
-        const base = ZONE_POSITIONS[zone];
-        const n = names.length;
-        names.forEach((name, i) => {
-            const offsetX = n === 1 ? 0 : (i - (n - 1) / 2) * 7;
-            dots.push({ name, px: base.x + offsetX, py: base.y, color: taskColor(name), site: taskStats[name]?.latest?.injectionSite });
-        });
-    }
+    const isZoneKey = (id) => id && Object.prototype.hasOwnProperty.call(zoneCounts, id);
+
+    const selectedZone = useMemo(() => {
+        if (!activeDot) return null;
+        if (isZoneKey(activeDot)) return activeDot;
+        return toHeatmapZone(taskStats[activeDot]?.latest?.zone) || null;
+    }, [activeDot, taskStats, zoneCounts]);
+
+    const dots = useMemo(() => {
+        return Object.entries(zoneCounts).map(([zone, count]) => {
+            const base = ZONE_POSITIONS[zone];
+            if (!base) return null;
+            const t = intensityFor(count);
+            return {
+                zone,
+                count,
+                px: base.x,
+                py: base.y,
+                color: heatColor(theme, t),
+                intensity: t,
+            };
+        }).filter(Boolean);
+    }, [zoneCounts, heatScale, theme.primary, theme.primaryDark, theme.isDark]);
 
     if (taskNames.length === 0) {
         return (
@@ -261,39 +224,65 @@ function SiteMapBody({ history, theme, activeDot, setActiveDot }) {
     return (
         <div className="space-y-5">
             <div
-                className="rounded-2xl p-4 flex items-center justify-center"
+                className="relative rounded-2xl p-4 flex items-center justify-center"
                 style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.03)' : theme.secondary }}
                 onClick={(e) => { if (e.target === e.currentTarget) setActiveDot(null); }}
             >
                 <div style={{ position: 'relative', width: 170, aspectRatio: '1 / 1' }}>
                     <BodyOutlineSvg theme={theme} />
-                    {dots.map((dot, i) => {
-                        const isActive = activeDot === dot.name;
+                    {dots.map((dot) => {
+                        const isActive = selectedZone === dot.zone;
                         const labelBelow = dot.py < 22;
                         return (
-                            <React.Fragment key={i}>
+                            <React.Fragment key={dot.zone}>
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); setActiveDot(isActive ? null : dot.name); }}
+                                    type="button"
+                                    aria-label={`${formatZoneLabel(dot.zone)}, ${dot.count} injections`}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveDot(isActive && isZoneKey(activeDot) ? null : dot.zone);
+                                    }}
                                     style={{
                                         position: 'absolute',
                                         left: `${dot.px}%`,
                                         top: `${dot.py}%`,
                                         transform: 'translate(-50%, -50%)',
-                                        width: isActive ? 18 : 14,
-                                        height: isActive ? 18 : 14,
+                                        width: isActive ? 20 : 16,
+                                        height: isActive ? 20 : 16,
                                         borderRadius: '50%',
                                         backgroundColor: dot.color,
-                                        border: `2px solid ${isActive ? '#fff' : 'transparent'}`,
-                                        boxShadow: isActive ? `0 0 0 3px ${dot.color}, 0 2px 8px rgba(0,0,0,0.3)` : `0 0 0 3px ${dot.color}30, 0 2px 6px rgba(0,0,0,0.25)`,
+                                        boxShadow: isActive
+                                            ? `0 0 0 2px #fff, 0 2px 8px rgba(0,0,0,0.28)`
+                                            : `0 2px 5px rgba(0,0,0,0.22)`,
+                                        border: isActive ? `2px solid ${dot.color}` : '2px solid rgba(255,255,255,0.85)',
                                         cursor: 'pointer',
                                         transition: 'all 0.15s ease',
                                         zIndex: isActive ? 20 : 10,
                                     }}
                                 />
                                 {isActive && (
-                                    <div style={{ position: 'absolute', left: `${dot.px}%`, top: labelBelow ? `calc(${dot.py}% + 14px)` : `calc(${dot.py}% - 14px)`, transform: 'translate(-50%, ' + (labelBelow ? '0' : '-100%') + ')', zIndex: 30, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
-                                        <div className="px-2 py-1 rounded-lg text-[10px] font-semibold shadow-lg" style={{ backgroundColor: theme.cardBackground, color: theme.text, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', border: `1px solid ${theme.border}`, borderLeftWidth: 3, borderLeftColor: dot.color }}>
-                                            {dot.name}
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            left: `${dot.px}%`,
+                                            top: labelBelow ? `calc(${dot.py}% + 14px)` : `calc(${dot.py}% - 14px)`,
+                                            transform: `translate(-50%, ${labelBelow ? '0' : '-100%'})`,
+                                            zIndex: 30,
+                                            pointerEvents: 'none',
+                                            whiteSpace: 'nowrap',
+                                        }}
+                                    >
+                                        <div
+                                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold shadow-lg"
+                                            style={{
+                                                backgroundColor: theme.cardBackground,
+                                                color: theme.text,
+                                                border: `1px solid ${theme.border}`,
+                                                borderLeftWidth: 3,
+                                                borderLeftColor: dot.color,
+                                            }}
+                                        >
+                                            {formatZoneLabel(dot.zone)} · {dot.count} inj.
                                         </div>
                                     </div>
                                 )}
@@ -301,28 +290,77 @@ function SiteMapBody({ history, theme, activeDot, setActiveDot }) {
                         );
                     })}
                 </div>
+
+                {/* Frequency legend — bottom right, discrete dots */}
+                <div
+                    className="absolute bottom-3 right-3 flex flex-col items-end gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-medium" style={{ color: theme.textLight }}>
+                            Less
+                        </span>
+                        {[0, 0.35, 0.65, 1].map((t) => (
+                            <span
+                                key={t}
+                                className="rounded-full flex-shrink-0"
+                                style={{
+                                    width: 10,
+                                    height: 10,
+                                    backgroundColor: heatColor(theme, t),
+                                    border: '1.5px solid rgba(255,255,255,0.85)',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+                                }}
+                                aria-hidden
+                            />
+                        ))}
+                        <span className="text-[10px] font-medium" style={{ color: theme.textLight }}>
+                            More
+                        </span>
+                    </div>
+                    <p className="text-[10px] leading-snug text-right" style={{ color: theme.textLight, opacity: 0.85 }}>
+                        Darker = used more
+                    </p>
+                </div>
             </div>
+
             <div>
-                <p className="text-[10px] uppercase tracking-widest font-semibold mb-2" style={{ color: theme.textLight }}>
-                    Last Known Site Per Protocol
+                <p className="text-xs font-semibold mb-2.5" style={{ color: theme.textLight }}>
+                    Last Known Site
                 </p>
-                <div className="grid grid-cols-2 gap-2">
-                    {taskNames.map(name => {
+                <div className="grid grid-cols-2 gap-2.5">
+                    {taskNames.map((name) => {
                         const stats = taskStats[name];
-                        const color = taskColor(name);
-                        const hasMapped = !!stats?.latest?.zone;
-                        const isHighlighted = activeDot === name;
+                        const zone = toHeatmapZone(stats?.latest?.zone);
+                        const zoneCount = zone ? (zoneCounts[zone] || 0) : 0;
+                        const color = zone ? heatColor(theme, intensityFor(zoneCount)) : (theme.primary || '#7F9E95');
+                        const hasMapped = !!zone;
+                        const isHighlighted = activeDot === name || (selectedZone && selectedZone === zone && isZoneKey(activeDot));
                         return (
-                            <button key={name} onClick={() => setActiveDot(isHighlighted ? null : name)} className="flex flex-col gap-1.5 p-3 rounded-xl border w-full text-left transition-all" style={{ borderColor: isHighlighted ? color : theme.border, backgroundColor: isHighlighted ? `${color}12` : theme.cardBackground }}>
-                                <div className="flex items-center justify-between gap-1">
-                                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 0 3px ${color}25` }} />
-                                    <span className="text-[10px] font-semibold" style={{ color: theme.primary }}>{stats.total} inj.</span>
+                            <button
+                                key={name}
+                                type="button"
+                                onClick={() => setActiveDot(isHighlighted && activeDot === name ? null : name)}
+                                className="flex flex-col gap-1.5 p-3 rounded-xl border w-full text-left transition-all"
+                                style={{
+                                    borderColor: isHighlighted ? color : theme.border,
+                                    backgroundColor: isHighlighted ? `${color}18` : theme.cardBackground,
+                                }}
+                            >
+                                <div className="flex items-start justify-between gap-2 min-w-0">
+                                    <p className="text-sm font-bold leading-tight truncate min-w-0" style={{ color: theme.text }}>
+                                        {name}
+                                    </p>
+                                    <span className="text-xs font-semibold flex-shrink-0 tabular-nums" style={{ color: theme.primary }}>
+                                        {stats.total} inj.
+                                    </span>
                                 </div>
-                                <p className="text-xs font-bold leading-tight truncate" style={{ color: theme.text }}>{name}</p>
-                                <p className="text-[10px] capitalize leading-tight truncate" style={{ color: theme.textLight }}>
+                                <p className="text-xs capitalize leading-tight truncate text-left" style={{ color: theme.textLight }}>
                                     {hasMapped ? stats.latest.injectionSite : <span className="opacity-40">Unmapped</span>}
                                 </p>
-                                <p className="text-[10px]" style={{ color: theme.textLight, opacity: 0.6 }}>{daysAgo(stats.latest?.ts) || '—'}</p>
+                                <p className="text-xs text-left" style={{ color: theme.textLight, opacity: 0.75 }}>
+                                    {daysAgo(stats.latest?.ts) || '—'}
+                                </p>
                             </button>
                         );
                     })}
@@ -599,20 +637,37 @@ export default function InjectionHistoryModal({ isOpen, onClose, theme, filterTa
                                 </div>
                             )}
 
-                            {/* Date pills */}
-                            {!(hasDateScope && !showAllTime) && filterOptions.map((option) => (
-                                <button
-                                    key={option.value}
-                                    onClick={() => setDateFilter(option.value)}
-                                    className="px-3 py-1.5 rounded-full text-[11px] font-medium transition-all flex-shrink-0"
+                            {/* Date range toggle */}
+                            {!(hasDateScope && !showAllTime) && (
+                                <div
+                                    className="flex items-center rounded-full p-0.5 flex-shrink-0"
                                     style={{
-                                        backgroundColor: dateFilter === option.value ? theme.primary : theme.secondary,
-                                        color: dateFilter === option.value ? '#ffffff' : theme.textLight,
+                                        backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : `${theme.primary}12`,
+                                        border: `1px solid ${theme.isDark ? 'rgba(255,255,255,0.1)' : `${theme.primary}20`}`,
                                     }}
+                                    role="group"
+                                    aria-label="Date range"
                                 >
-                                    {option.label}
-                                </button>
-                            ))}
+                                    {filterOptions.map((option) => {
+                                        const selected = dateFilter === option.value;
+                                        return (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                onClick={() => setDateFilter(option.value)}
+                                                className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all"
+                                                style={{
+                                                    backgroundColor: selected ? (theme.primaryDark || theme.primary) : 'transparent',
+                                                    color: selected ? '#ffffff' : theme.textLight,
+                                                    boxShadow: selected ? '0 1px 3px rgba(0,0,0,0.15)' : 'none',
+                                                }}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
 
                         {/* View Toggle */}
