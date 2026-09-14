@@ -77,13 +77,16 @@ export default function WorkQueueToolsPanels({
             style={{ flex: 1, padding: '7px 10px', border: `1px solid ${t.border}`, borderRadius: '8px', fontSize: '13px', fontFamily: 'monospace', textTransform: 'uppercase' }}
           />
           <ChipButton onClick={searchMissedTicket} disabled={addMissedSearching || !addMissedSearch.trim()} loading={addMissedSearching}>
-            MagnifyingGlass
+            <MagnifyingGlass size={13} /> Search
           </ChipButton>
         </div>
         {addMissedError && <div style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>{addMissedError}</div>}
         {addMissedResult && (
           <div style={{ fontSize: '12px', color: t.textLight, marginBottom: '8px' }}>
-            #{addMissedResult.ticketNumber} — {addMissedResult.userEmail}
+            {addMissedResult.isFeedback ? 'Feedback' : 'Ticket'} #{addMissedResult.ticketNumber} — {addMissedResult.userEmail}
+            {addMissedResult._note && (
+              <div style={{ marginTop: '4px', color: '#B45309' }}>{addMissedResult._note}</div>
+            )}
             <div style={{ marginTop: '8px' }}>
               <ChipButton onClick={addMissedTicketToQueue} loading={addMissedAdding} variant="primary">
                 Add to User Reports

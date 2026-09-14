@@ -668,34 +668,98 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
   // on every dashboard load was a major source of initial slowness.
 
   const searchMissedTicket = async () => {
-    const term = addMissedSearch.trim();
-    if (!term) return;
+    const raw = addMissedSearch.trim();
+    if (!raw) return;
     setAddMissedSearching(true);
     setAddMissedResult(null);
     setAddMissedError('');
     try {
       const firestore = getFirestore();
-      // MagnifyingGlass by ticketNumber first
+      // Normalize: accept "z100", "Z100", "100", "F-ABC123"
+      let term = raw.toUpperCase();
+      if (/^\d+$/.test(term)) term = `Z${term.padStart(3, '0')}`;
+      else if (/^Z\d+$/.test(term)) term = `Z${term.slice(1).padStart(3, '0')}`;
+
+      // Feedback / bug reports use F-#### ids — those are not supportTickets
+      if (term.startsWith('F')) {
+        const feedbackIdSuffix = term.replace(/^F-?/, '');
+        const fromCache = (feedbackItems || []).find((f) => {
+          const id = String(f.id || '').toUpperCase();
+          const display = `F-${id.slice(-6)}`;
+          return id.endsWith(feedbackIdSuffix) || display === term || `F${id.slice(-6)}` === term;
+        });
+        if (fromCache) {
+          setAddMissedResult({
+            id: fromCache.id,
+            isFeedback: true,
+            ticketNumber: `F-${String(fromCache.id).slice(-6).toUpperCase()}`,
+            userEmail: fromCache.userEmail,
+            subject: fromCache.type === 'bug' ? 'Bug Report' : 'Suggestion',
+            status: fromCache.status,
+            type: fromCache.type,
+            message: fromCache.message,
+          });
+          return;
+        }
+        // Fallback: direct doc id if they pasted a full feedback id
+        if (feedbackIdSuffix.length > 6) {
+          const direct = await getDoc(doc(firestore, 'feedback', raw.replace(/^F-?/i, '')));
+          if (direct.exists()) {
+            const data = direct.data();
+            setAddMissedResult({
+              id: direct.id,
+              isFeedback: true,
+              ticketNumber: `F-${direct.id.slice(-6).toUpperCase()}`,
+              userEmail: data.userEmail,
+              subject: data.type === 'bug' ? 'Bug Report' : 'Suggestion',
+              status: data.status,
+              type: data.type,
+              message: data.message,
+            });
+            return;
+          }
+        }
+        setAddMissedError(`No feedback found for "${term}". Bug/suggestion reports use F- numbers, not Z- tickets.`);
+        return;
+      }
+
+      // Search by ticketNumber first
       const byNumber = await getDocs(
-        query(collection(firestore, 'supportTickets'), where('ticketNumber', '==', term.toUpperCase()))
+        query(collection(firestore, 'supportTickets'), where('ticketNumber', '==', term))
       );
       if (!byNumber.empty) {
         const d = byNumber.docs[0];
         setAddMissedResult({ id: d.id, ...d.data() });
         return;
       }
-      // Fallback: search by requestNumbers array
+      // Fallback: search by requestNumbers array (appended Z### refs on a parent ticket)
       const byRequest = await getDocs(
-        query(collection(firestore, 'supportTickets'), where('requestNumbers', 'array-contains', term.toUpperCase()))
+        query(collection(firestore, 'supportTickets'), where('requestNumbers', 'array-contains', term))
       );
       if (!byRequest.empty) {
         const d = byRequest.docs[0];
-        setAddMissedResult({ id: d.id, ...d.data() });
+        const data = d.data();
+        setAddMissedResult({
+          id: d.id,
+          ...data,
+          _matchedRequestNumber: term,
+          _note: term !== data.ticketNumber
+            ? `${term} is a request on parent ticket ${data.ticketNumber}`
+            : undefined,
+        });
         return;
       }
-      setAddMissedError(`No ticket found for "${term}". Try the exact ticket number, e.g. Z100.`);
+      setAddMissedError(
+        `No ticket found for "${term}". Tip: appended requests share a parent ticket — try the parent Z### from the email, or run Backlog Scan.`
+      );
     } catch (err) {
-      setAddMissedError('MagnifyingGlass failed: ' + (err?.message || err));
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      setAddMissedError(
+        code === 'permission-denied'
+          ? 'Search failed: admin permission denied. Sign in with an admin account and refresh.'
+          : `Search failed: ${msg}`
+      );
     } finally {
       setAddMissedSearching(false);
     }
@@ -707,19 +771,28 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     setAddMissedError('');
     try {
       const addToQueue = httpsCallable(functions, 'addTicketToWorkQueue');
-      const result = await addToQueue({ ticketId: addMissedResult.id });
+      const payload = addMissedResult.isFeedback
+        ? { feedbackId: addMissedResult.id }
+        : { ticketId: addMissedResult.id, ticketNumber: addMissedResult.ticketNumber };
+      const result = await addToQueue(payload);
       if (!result.data?.success) throw new Error(result.data?.message || 'Failed to add ticket');
 
       const ticket = addMissedResult;
+      const label = ticket.isFeedback
+        ? ticket.ticketNumber
+        : (ticket._matchedRequestNumber && ticket._matchedRequestNumber !== ticket.ticketNumber
+          ? `${ticket._matchedRequestNumber} (parent ${ticket.ticketNumber})`
+          : `#${ticket.ticketNumber || ticket.id.slice(-6)}`);
       window.dispatchEvent(new CustomEvent('tpp:toast', {
-        detail: { message: `Ticket #${ticket.ticketNumber || ticket.id.slice(-6)} added to user reports ✓`, type: 'success' }
+        detail: { message: `${ticket.isFeedback ? 'Feedback' : 'Ticket'} ${label} added to user reports ✓`, type: 'success' }
       }));
       setShowAddMissed(false);
       setAddMissedSearch('');
       setAddMissedResult(null);
       setAddMissedError('');
     } catch (err) {
-      setAddMissedError('Failed to add: ' + (err?.message || err));
+      const msg = err?.message || String(err);
+      setAddMissedError('Failed to add: ' + msg.replace(/^FirebaseError:\s*/i, ''));
     } finally {
       setAddMissedAdding(false);
     }
@@ -751,15 +824,25 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     try {
       const firestore = getFirestore();
       // Build a map: ticketId → { latestLogTimestamp, isMarkedFixed }
+      // Include BOTH open and closed queue rows so "replied after close" is accurate.
       const logMap = new Map();
-      for (const item of workQueue) {
-        if (!item.ticketId) continue;
-        const itemTs = item.timestamp?.toDate?.()?.getTime() ?? item.timestamp ?? 0;
+      const considerLog = (item) => {
+        if (!item.ticketId) return;
+        const itemTs = item.timestamp?.toDate?.()?.getTime?.()
+          ?? (typeof item.timestamp === 'number' ? item.timestamp : 0);
+        const fixedAt = item.markedFixedAt?.toDate?.()?.getTime?.()
+          ?? (typeof item.markedFixedAt === 'number' ? item.markedFixedAt : 0);
         const existing = logMap.get(item.ticketId);
-        if (!existing || itemTs > (existing.ts ?? 0)) {
-          logMap.set(item.ticketId, { ts: itemTs, markedFixed: item.markedFixed });
+        const ts = Math.max(itemTs || 0, fixedAt || 0);
+        if (!existing || ts > (existing.ts ?? 0)) {
+          logMap.set(item.ticketId, { ts, markedFixed: !!item.markedFixed });
+        } else if (existing && item.markedFixed === false) {
+          // Prefer an open row when timestamps are equal / close
+          logMap.set(item.ticketId, { ...existing, markedFixed: false });
         }
-      }
+      };
+      for (const item of workQueue) considerLog(item);
+      for (const item of closedQueue) considerLog(item);
 
       // Scan supportTickets with any activity in last 90 days
       const cutoff = new Date();
@@ -775,6 +858,8 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
       const missed = [];
       for (const d of snap.docs) {
         const data = d.data();
+        // Skip fully closed/merged tickets with no open work left
+        if (data.status === 'merged') continue;
         const lastMsgTs = data.lastMessageAt?.toDate?.()?.getTime() ?? 0;
         const logEntry = logMap.get(d.id);
 
@@ -783,17 +868,20 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         const repliedAfterClose = logEntry?.markedFixed && lastMsgTs > (logEntry.ts ?? 0);
 
         if (noLog || repliedAfterClose) {
-          // Check if it's already pending in our queue (noLog but in workQueue as pending)
+          // Check if it's already pending in our queue
           const alreadyPending = workQueue.some(q => q.ticketId === d.id && !q.markedFixed);
           if (!alreadyPending) {
             missed.push({
               id: d.id,
               ticketNumber: data.ticketNumber,
+              requestNumbers: data.requestNumbers || [],
               userEmail: data.userEmail,
               subject: data.subject,
               status: data.status,
               lastMessageAt: data.lastMessageAt,
-              reason: noLog ? 'Never processed by Ghosty' : 'User replied after ticket was closed',
+              reason: noLog
+                ? 'Never landed in User Reports queue (email may still have been sent)'
+                : 'User replied after ticket was closed in queue',
             });
           }
         }

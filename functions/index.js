@@ -5204,6 +5204,107 @@ async function deleteTicketImages(ticketId, db) {
 }
 
 // Create a new support ticket
+/**
+ * Ensure a support ticket is visible in the admin User Reports queue.
+ * Upserts an open (markedFixed=false) ai_worker_logs row: refreshes timestamp/message,
+ * clears admin read flags, and creates a row when none exists.
+ * Used when appending to an open ticket (emails previously fired without queue updates)
+ * and when admins manually pull a missed ticket.
+ */
+async function ensureTicketInWorkQueue(db, FieldValue, opts) {
+  const {
+    ticketId,
+    ticketNumber,
+    ticketType = 'support',
+    subject = 'Support Request',
+    userName = 'Unknown',
+    userEmail = '',
+    originalMessage = '',
+    reasoning = 'Queued for admin review',
+    urgency = 'medium',
+    requestNumber = null,
+    userAccountInfo = null,
+    addedManually = false,
+    autoQueued = false,
+  } = opts || {};
+
+  if (!ticketId) {
+    throw new Error('ensureTicketInWorkQueue: ticketId is required');
+  }
+
+  const openLogs = await db.collection(COLLECTIONS.USER_REPORTS_QUEUE)
+    .where('ticketId', '==', ticketId)
+    .where('markedFixed', '==', false)
+    .limit(5)
+    .get();
+
+  const bumpFields = {
+    originalMessage: originalMessage || '',
+    timestamp: FieldValue.serverTimestamp(),
+    adminReadAt: null,
+    adminMarkedUnread: true,
+    markedFixed: false,
+    markedFixedAt: null,
+    reasoning,
+    subject: subject || 'Support Request',
+    ...(requestNumber ? { latestRequestNumber: requestNumber } : {}),
+  };
+
+  if (!openLogs.empty) {
+    // Refresh the newest open log; close any duplicate open rows for the same ticket
+    const sorted = openLogs.docs.slice().sort((a, b) => {
+      const ta = a.data().timestamp?.toMillis?.() ?? 0;
+      const tb = b.data().timestamp?.toMillis?.() ?? 0;
+      return tb - ta;
+    });
+    const primary = sorted[0];
+    await primary.ref.update(bumpFields);
+    for (let i = 1; i < sorted.length; i++) {
+      await sorted[i].ref.update({
+        markedFixed: true,
+        markedFixedAt: FieldValue.serverTimestamp(),
+        adminNotes: `Duplicate open queue row closed; kept ${primary.id}`,
+      });
+    }
+    return { logId: primary.id, created: false, updated: true };
+  }
+
+  const logRef = await db.collection(COLLECTIONS.USER_REPORTS_QUEUE).add({
+    ticketId,
+    ticketNumber: ticketNumber || ticketId.slice(-6).toUpperCase(),
+    ticketType,
+    subject: subject || 'Support Request',
+    userName,
+    userEmail,
+    originalMessage: originalMessage || '',
+    timestamp: FieldValue.serverTimestamp(),
+    route: addedManually ? 'manual' : (autoQueued ? null : 'append'),
+    confidence: addedManually ? 100 : null,
+    reasoning,
+    complexity: addedManually ? 'unknown' : null,
+    urgency,
+    keywords: [],
+    executionModel: addedManually ? 'manual' : null,
+    executionCost: 0,
+    triageCost: 0,
+    totalCost: 0,
+    responseGenerated: false,
+    responsePosted: false,
+    responseContent: null,
+    markedFixed: false,
+    humanOverride: !!addedManually,
+    addedManually: !!addedManually,
+    ...(addedManually ? { addedManuallyAt: FieldValue.serverTimestamp() } : {}),
+    autoQueued: !!autoQueued,
+    adminReadAt: null,
+    adminMarkedUnread: true,
+    ...(requestNumber ? { latestRequestNumber: requestNumber } : {}),
+    ...(userAccountInfo ? { userAccountInfo } : {}),
+  });
+
+  return { logId: logRef.id, created: true, updated: false };
+}
+
 exports.createSupportTicket = onCall(
   {
     cors: true,
@@ -5304,7 +5405,37 @@ exports.createSupportTicket = onCall(
           updatedAt: FieldValue.serverTimestamp(),
           lastMessageAt: FieldValue.serverTimestamp(),
           requestNumbers: requestNumbers,
+          // Clear ticket-level admin read so mobile/admin lists treat this as new activity
+          adminReadAt: null,
         });
+
+        // CRITICAL: appended messages used to email without touching ai_worker_logs.
+        // That left new Z### request numbers invisible on the User Reports dashboard.
+        try {
+          const queueResult = await ensureTicketInWorkQueue(db, FieldValue, {
+            ticketId: existingId,
+            ticketNumber: existingNumber,
+            ticketType: existingData.type || type || 'support',
+            subject: existingData.subject || `Support Request - ${type || 'support'}`,
+            userName: userName || userEmail.split('@')[0],
+            userEmail: normalizedEmail,
+            originalMessage: message,
+            reasoning: `New user request ${requestNumber} appended to open ticket ${existingNumber}`,
+            urgency: (existingData.type || type) === 'bug' ? 'high' : 'medium',
+            requestNumber,
+            userAccountInfo: existingData.userAccountInfo || null,
+            autoQueued: true,
+          });
+          logger.info(
+            `✅ Queue ${queueResult.created ? 'created' : 'updated'} for appended request ${requestNumber} on ${existingNumber} (log ${queueResult.logId})`
+          );
+        } catch (queueError) {
+          logger.error(
+            `⚠️ Failed to queue appended message on ticket ${existingId} (${requestNumber}):`,
+            queueError.message
+          );
+          // Keep ticket+email path alive, but this is the failure mode that hid reports
+        }
 
         const escapeHtml = (text) => {
           const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
@@ -5447,7 +5578,7 @@ exports.createSupportTicket = onCall(
       // === AUTO-QUEUE: immediately add to work queue bypassing Ghosty ===
       // Ghosty may be paused, erroring, or slow — every ticket must land in queue regardless.
       try {
-        await db.collection(COLLECTIONS.USER_REPORTS_QUEUE).add({
+        await ensureTicketInWorkQueue(db, FieldValue, {
           ticketId: ticketRef.id,
           ticketNumber: ticketNumber,
           ticketType: type,
@@ -5455,25 +5586,10 @@ exports.createSupportTicket = onCall(
           userName: userName || userEmail.split('@')[0],
           userEmail: normalizedEmail,
           originalMessage: message,
-          timestamp: FieldValue.serverTimestamp(),
-          route: null,
-          confidence: null,
           reasoning: 'Auto-queued on ticket creation',
-          complexity: null,
           urgency: type === 'bug' ? 'high' : 'medium',
-          keywords: [],
-          executionModel: null,
-          executionCost: 0,
-          triageCost: 0,
-          totalCost: 0,
-          responseGenerated: false,
-          responsePosted: false,
-          responseContent: null,
-          markedFixed: false,
-          humanOverride: false,
-          addedManually: false,
-          autoQueued: true,
           userAccountInfo: userAccountInfo || null,
+          autoQueued: true,
         });
         logger.info(`✅ Auto-queued ticket ${ticketRef.id} (${ticketNumber}) in work queue`);
       } catch (queueError) {
@@ -6005,67 +6121,193 @@ exports.closeSupportTicketFromWorkQueue = onCall(
 exports.addTicketToWorkQueue = onCall(
   { cors: true },
   async (request) => {
-    verifyAdmin(request);
-    const { ticketId } = request.data;
-    if (!ticketId) throw new HttpsError('invalid-argument', 'ticketId is required');
-
-    const db = admin.firestore();
-    const FieldValue = admin.firestore.FieldValue;
-
-    const ticketRef = db.collection('supportTickets').doc(ticketId);
-    const ticketSnap = await ticketRef.get();
-    if (!ticketSnap.exists) throw new HttpsError('not-found', `Ticket ${ticketId} not found`);
-    const ticket = ticketSnap.data();
-
-    // Get latest user message for context
-    let latestMsg = '';
     try {
-      const msgs = await ticketRef.collection('messages')
-        .orderBy('createdAt', 'desc')
-        .limit(10)
-        .get();
-      const userMsg = msgs.docs.find(d => d.data().senderType === 'user');
-      latestMsg = userMsg?.data()?.message || userMsg?.data()?.text || '';
-    } catch (_) {}
+      verifyAdmin(request);
+      const { ticketId, ticketNumber: ticketNumberInput, feedbackId } = request.data || {};
 
-    // Re-open the ticket
-    await ticketRef.update({
-      status: 'open',
-      reopenedByAdmin: true,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+      const db = admin.firestore();
+      const FieldValue = admin.firestore.FieldValue;
 
-    // Create work queue log entry
-    const logRef = await db.collection(COLLECTIONS.USER_REPORTS_QUEUE).add({
-      ticketId: ticketId,
-      ticketNumber: ticket.ticketNumber || ticketId.slice(-6).toUpperCase(),
-      ticketType: ticket.type || 'support',
-      subject: ticket.subject || 'Support Request',
-      userName: ticket.userName || ticket.userDisplayName || 'Unknown',
-      userEmail: ticket.userEmail || '',
-      originalMessage: latestMsg || ticket.subject || '',
-      timestamp: FieldValue.serverTimestamp(),
-      route: 'manual',
-      confidence: 100,
-      reasoning: 'Manually added to queue by admin',
-      complexity: 'unknown',
-      urgency: 'medium',
-      keywords: [],
-      executionModel: 'manual',
-      executionCost: 0,
-      triageCost: 0,
-      totalCost: 0,
-      responseGenerated: false,
-      responsePosted: false,
-      responseContent: null,
-      markedFixed: false,
-      humanOverride: true,
-      addedManually: true,
-      addedManuallyAt: FieldValue.serverTimestamp(),
-    });
+      // Feedback / bug reports (F-####) — separate from supportTickets
+      if (feedbackId) {
+        const feedbackRef = db.collection('feedback').doc(feedbackId);
+        const feedbackSnap = await feedbackRef.get();
+        if (!feedbackSnap.exists) {
+          throw new HttpsError('not-found', `Feedback ${feedbackId} not found`);
+        }
+        const feedback = feedbackSnap.data();
+        const displayNumber = `F-${feedbackId.slice(-6).toUpperCase()}`;
 
-    logger.info(`✅ Admin manually added ticket ${ticketId} to work queue as log ${logRef.id}`);
-    return { success: true, logId: logRef.id };
+        const openLogs = await db.collection(COLLECTIONS.USER_REPORTS_QUEUE)
+          .where('feedbackId', '==', feedbackId)
+          .where('markedFixed', '==', false)
+          .limit(1)
+          .get();
+
+        if (!openLogs.empty) {
+          await openLogs.docs[0].ref.update({
+            originalMessage: feedback.message || '',
+            timestamp: FieldValue.serverTimestamp(),
+            adminReadAt: null,
+            adminMarkedUnread: true,
+            markedFixed: false,
+            markedFixedAt: null,
+            reasoning: 'Manually re-queued feedback by admin',
+          });
+          return {
+            success: true,
+            logId: openLogs.docs[0].id,
+            feedbackId,
+            ticketNumber: displayNumber,
+            created: false,
+            updated: true,
+            isFeedback: true,
+          };
+        }
+
+        const logRef = await db.collection(COLLECTIONS.USER_REPORTS_QUEUE).add({
+          feedbackId,
+          ticketId: null,
+          ticketNumber: displayNumber,
+          ticketType: feedback.type === 'bug' ? 'bug' : 'feedback',
+          subject: feedback.type === 'bug'
+            ? `Bug Report: ${(feedback.message || '').slice(0, 60)}`
+            : `Suggestion: ${(feedback.message || '').slice(0, 60)}`,
+          userName: feedback.userEmail ? String(feedback.userEmail).split('@')[0] : 'Anonymous',
+          userEmail: feedback.userEmail || 'anonymous',
+          originalMessage: feedback.message || '',
+          timestamp: FieldValue.serverTimestamp(),
+          route: 'manual',
+          confidence: 100,
+          reasoning: 'Manually added feedback to queue by admin',
+          urgency: feedback.type === 'bug' ? 'high' : 'low',
+          keywords: [],
+          executionModel: 'manual',
+          executionCost: 0,
+          triageCost: 0,
+          totalCost: 0,
+          responseGenerated: false,
+          responsePosted: false,
+          responseContent: null,
+          markedFixed: false,
+          humanOverride: true,
+          addedManually: true,
+          addedManuallyAt: FieldValue.serverTimestamp(),
+          autoQueued: false,
+          isFeedback: true,
+          adminReadAt: null,
+          adminMarkedUnread: true,
+        });
+
+        logger.info(`✅ Admin manually added feedback ${feedbackId} to work queue as log ${logRef.id}`);
+        return {
+          success: true,
+          logId: logRef.id,
+          feedbackId,
+          ticketNumber: displayNumber,
+          created: true,
+          updated: false,
+          isFeedback: true,
+        };
+      }
+
+      let resolvedTicketId = ticketId || null;
+      let ticketSnap = null;
+
+      // Allow lookup by ticketNumber / requestNumber when ticketId is missing
+      // (admin UI "Add Missed" may pass either).
+      if (!resolvedTicketId && ticketNumberInput) {
+        const term = String(ticketNumberInput).trim().toUpperCase();
+        let byNumber = await db.collection('supportTickets')
+          .where('ticketNumber', '==', term)
+          .limit(1)
+          .get();
+        if (byNumber.empty) {
+          byNumber = await db.collection('supportTickets')
+            .where('requestNumbers', 'array-contains', term)
+            .limit(1)
+            .get();
+        }
+        if (byNumber.empty) {
+          throw new HttpsError(
+            'not-found',
+            `No support ticket found for "${term}". If this is an F-#### bug/suggestion, look under Feedback — those are not support tickets.`
+          );
+        }
+        resolvedTicketId = byNumber.docs[0].id;
+        ticketSnap = byNumber.docs[0];
+      }
+
+      if (!resolvedTicketId) {
+        throw new HttpsError('invalid-argument', 'ticketId, ticketNumber, or feedbackId is required');
+      }
+
+      const ticketRef = db.collection('supportTickets').doc(resolvedTicketId);
+      if (!ticketSnap) {
+        ticketSnap = await ticketRef.get();
+      }
+      if (!ticketSnap.exists) {
+        throw new HttpsError('not-found', `Ticket ${resolvedTicketId} not found`);
+      }
+      const ticket = ticketSnap.data();
+
+      // Get latest user message for context
+      let latestMsg = '';
+      let latestRequestNumber = null;
+      try {
+        const msgs = await ticketRef.collection('messages')
+          .orderBy('createdAt', 'desc')
+          .limit(10)
+          .get();
+        const userMsg = msgs.docs.find(d => d.data().senderType === 'user');
+        latestMsg = userMsg?.data()?.message || userMsg?.data()?.text || '';
+        latestRequestNumber = userMsg?.data()?.requestNumber || null;
+      } catch (msgErr) {
+        logger.warn(`addTicketToWorkQueue: could not load messages for ${resolvedTicketId}:`, msgErr.message);
+      }
+
+      // Re-open the ticket
+      await ticketRef.update({
+        status: 'open',
+        reopenedByAdmin: true,
+        adminReadAt: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      const queueResult = await ensureTicketInWorkQueue(db, FieldValue, {
+        ticketId: resolvedTicketId,
+        ticketNumber: ticket.ticketNumber || resolvedTicketId.slice(-6).toUpperCase(),
+        ticketType: ticket.type || 'support',
+        subject: ticket.subject || 'Support Request',
+        userName: ticket.userName || ticket.userDisplayName || 'Unknown',
+        userEmail: ticket.userEmail || '',
+        originalMessage: latestMsg || ticket.subject || '',
+        reasoning: 'Manually added to queue by admin',
+        urgency: ticket.type === 'bug' ? 'high' : 'medium',
+        requestNumber: latestRequestNumber,
+        userAccountInfo: ticket.userAccountInfo || null,
+        addedManually: true,
+      });
+
+      logger.info(
+        `✅ Admin manually added ticket ${resolvedTicketId} to work queue as log ${queueResult.logId} (created=${queueResult.created})`
+      );
+      return {
+        success: true,
+        logId: queueResult.logId,
+        ticketId: resolvedTicketId,
+        ticketNumber: ticket.ticketNumber || null,
+        created: queueResult.created,
+        updated: queueResult.updated,
+      };
+    } catch (error) {
+      if (error instanceof HttpsError) throw error;
+      logger.error(`❌ addTicketToWorkQueue failed:`, error.message, error.stack);
+      throw new HttpsError(
+        'internal',
+        `Failed to add ticket to work queue: ${error.message || 'unknown error'}`
+      );
+    }
   }
 );
 
@@ -6346,6 +6588,25 @@ exports.reopenTicket = onCall(
         reopenedBy: request.auth.token.email || request.auth.uid,
         customerReopened: true // Tag for admin to see
       });
+
+      // Put it back on the User Reports dashboard (previously reopen only flipped ticket status)
+      try {
+        await ensureTicketInWorkQueue(db, FieldValue, {
+          ticketId,
+          ticketNumber: ticketData.ticketNumber || ticketId.slice(-6).toUpperCase(),
+          ticketType: ticketData.type || 'support',
+          subject: ticketData.subject || 'Support Request',
+          userName: ticketData.userName || ticketData.userEmail?.split('@')[0] || 'Unknown',
+          userEmail: ticketData.userEmail || '',
+          originalMessage: ticketData.subject || 'Customer reopened ticket',
+          reasoning: 'Customer reopened closed ticket',
+          urgency: ticketData.type === 'bug' ? 'high' : 'medium',
+          userAccountInfo: ticketData.userAccountInfo || null,
+          autoQueued: true,
+        });
+      } catch (queueError) {
+        logger.error(`⚠️ Failed to re-queue reopened ticket ${ticketId}:`, queueError.message);
+      }
 
       logger.info(`✅ Ticket reopened successfully: ${ticketId}`);
       return { 
