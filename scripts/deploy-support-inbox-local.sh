@@ -24,4 +24,7 @@ echo "Using: ${FB[*]}"
 "${FB[@]}" deploy --only "$ONLY" --project "$PROJECT" --force
 echo
 "${FB[@]}" functions:list --project "$PROJECT" | grep -Ei 'createSupportTicket|reopenTicket|addTicketToWorkQueue|submitFeedback|dailySupportInboxBacklogScan|runSupportInboxBacklogScanNow' || true
-echo "✓ Deploy finished."
+echo
+echo "→ Verifying production HTTP endpoints..."
+./scripts/verify-support-inbox-deploy.sh
+echo "✓ Deploy finished and verified."
