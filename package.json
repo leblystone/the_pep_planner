@@ -15,6 +15,8 @@
     "deploy:hosting": "npm run build && firebase deploy --only hosting --project tpp-splendide && node scripts/update-version-config.cjs",
     "deploy:rules": "firebase deploy --only firestore:rules --project tpp-splendide",
     "deploy:downloads": "npm run build && firebase deploy --only functions:digitalDownload,functions:serveDigitalDownloadFile,functions:adminResendDigitalDownload,hosting --project tpp-splendide",
+    "deploy:support-inbox": "./scripts/deploy-support-inbox-local.sh",
+    "verify:support-inbox": "./scripts/verify-support-inbox-deploy.sh",
     "mobile:build": "npm run build && npx cap sync",
     "mobile:android": "npm run mobile:build && npx cap run android",
     "mobile:ios": "npm run mobile:build && npx cap run ios",

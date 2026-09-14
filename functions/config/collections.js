@@ -19,21 +19,25 @@
  *   there is intentionally NO collection named "userReportsQueue" in the console.
  */
 
+// Callers use: const { COLLECTIONS } = require('./config/collections');
+// Keep this shape aligned with src/config/collections.js (export const COLLECTIONS).
 module.exports = {
-  // ─── User Reports / Work Queue ───────────────────────────────────────────────
-  /**
-   * Firestore path: "ai_worker_logs"
-   * One document per queued user report (support, feedback, deletion).
-   * Written here on ticket/feedback/deletion creation; read by admin dashboard.
-   * The path is legacy (Ghosty era) — the collection was never renamed in Firestore.
-   */
-  USER_REPORTS_QUEUE: 'ai_worker_logs',
+  COLLECTIONS: {
+    // ─── User Reports / Work Queue ─────────────────────────────────────────────
+    /**
+     * Firestore path: "ai_worker_logs"
+     * One document per queued user report (support, feedback, deletion).
+     * Written here on ticket/feedback/deletion creation; read by admin dashboard.
+     * The path is legacy (Ghosty era) — the collection was never renamed in Firestore.
+     */
+    USER_REPORTS_QUEUE: 'ai_worker_logs',
 
-  // ─── Other collections (add as needed) ───────────────────────────────────────
-  SUPPORT_TICKETS:    'supportTickets',
-  FEEDBACK:           'feedback',
+    // ─── Other collections (add as needed) ─────────────────────────────────────
+    SUPPORT_TICKETS:    'supportTickets',
+    FEEDBACK:           'feedback',
 
-  // Passkey / WebAuthn (Face ID & Fingerprint sign-in)
-  PASSKEY_CREDENTIALS: 'passkeyCredentials',
-  PASSKEY_CHALLENGES:  'passkeyChallenges',
+    // Passkey / WebAuthn (Face ID & Fingerprint sign-in)
+    PASSKEY_CREDENTIALS: 'passkeyCredentials',
+    PASSKEY_CHALLENGES:  'passkeyChallenges',
+  },
 };

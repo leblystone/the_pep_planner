@@ -1,0 +1,5 @@
+# Touch this file (and push) to trigger .github/workflows/deploy-support-inbox.yml
+# on branch cursor/fix-admin-support-inbox-queue-bc18.
+# Requires repo Actions secret FIREBASE_TOKEN (from `firebase login:ci`).
+triggered_at: 2026-09-14T15:59:00Z
+purpose: support-inbox-functions-deploy
