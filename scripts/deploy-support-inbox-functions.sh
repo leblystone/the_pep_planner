@@ -34,6 +34,6 @@ npx --yes firebase-tools@13 deploy \
 
 echo "→ Verifying deployed function list (filtered)..."
 npx --yes firebase-tools@13 functions:list --project "${PROJECT}" --non-interactive \
-  | rg -i 'createSupportTicket|reopenTicket|addTicketToWorkQueue|dailySupportInboxBacklogScan|runSupportInboxBacklogScanNow' || true
+  | rg -i 'createSupportTicket|reopenTicket|addTicketToWorkQueue|submitFeedback|dailySupportInboxBacklogScan|runSupportInboxBacklogScanNow' || true
 
 echo "✓ Deploy script finished."
