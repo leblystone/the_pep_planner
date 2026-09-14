@@ -23,11 +23,11 @@ tmux -f /exec-daemon/tmux.portal.conf send-keys -t "$SESSION:0.0" "$CODE" Enter
 
 echo "→ Waiting for login to finish..."
 TOKEN=""
-for i in $(seq 1 60); do
+for i in $(seq 1 90); do
   sleep 2
   PANE=$(tmux -f /exec-daemon/tmux.portal.conf capture-pane -t "$SESSION:0.0" -p -S -100 2>/dev/null || true)
-  # login:ci prints a long token on success
-  CAND=$(printf '%s\n' "$PANE" | rg -o '1//[A-Za-z0-9_-]+' | tail -1 || true)
+  # login:ci prints a long token on success (usually starts with 1//)
+  CAND=$(printf '%s\n' "$PANE" | rg -o '1//[A-Za-z0-9._~+/-]+' | tail -1 || true)
   if [[ -n "$CAND" ]]; then
     TOKEN="$CAND"
     break
@@ -49,6 +49,11 @@ if [[ -n "$TOKEN" ]]; then
   echo "→ Captured CI token (${#TOKEN} chars)"
 fi
 
+if [[ -z "${FIREBASE_TOKEN:-}" ]] && ! node -e "const j=require(require('os').homedir()+'/.config/configstore/firebase-tools.json'); if(!(j.tokens&&j.tokens.refresh_token)) process.exit(1);" 2>/dev/null; then
+  echo "ERROR: login did not produce a token. Re-run firebase login:ci and try a fresh code."
+  exit 1
+fi
+
 PROJECT="${FIREBASE_PROJECT:-tpp-splendide}"
 ONLY="functions:createSupportTicket,functions:reopenTicket,functions:addTicketToWorkQueue,functions:submitFeedback,functions:dailySupportInboxBacklogScan,functions:runSupportInboxBacklogScanNow"
 
@@ -62,5 +67,8 @@ fi
 echo "→ Listing deployed functions..."
 ./node_modules/.bin/firebase functions:list --project "$PROJECT" --non-interactive ${FIREBASE_TOKEN:+--token "$FIREBASE_TOKEN"} \
   | rg -i 'createSupportTicket|reopenTicket|addTicketToWorkQueue|submitFeedback|dailySupportInboxBacklogScan|runSupportInboxBacklogScanNow' || true
+
+echo "→ Verifying production HTTP endpoints..."
+./scripts/verify-support-inbox-deploy.sh
 
 echo "✓ Done."
