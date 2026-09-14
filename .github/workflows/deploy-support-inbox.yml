@@ -1,0 +1,69 @@
+name: Deploy support-inbox functions
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type deploy to run'
+        required: true
+        default: ''
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirm == 'deploy'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install functions deps
+        run: npm ci --omit=dev
+        working-directory: functions
+
+      - name: Require FIREBASE_TOKEN secret
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "Missing GitHub Actions secret FIREBASE_TOKEN."
+            echo "Create one with: firebase login:ci"
+            echo "Then: Repo Settings → Secrets → Actions → New repository secret FIREBASE_TOKEN"
+            exit 1
+          fi
+
+      - name: Deploy support-inbox functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_PROJECT: tpp-splendide
+        run: |
+          npx --yes firebase-tools@13 deploy \
+            --only functions:createSupportTicket,functions:reopenTicket,functions:addTicketToWorkQueue,functions:submitFeedback,functions:dailySupportInboxBacklogScan,functions:runSupportInboxBacklogScanNow \
+            --project "$FIREBASE_PROJECT" \
+            --force \
+            --non-interactive \
+            --token "$FIREBASE_TOKEN"
+
+      - name: Verify deployed functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_PROJECT: tpp-splendide
+        run: |
+          npx --yes firebase-tools@13 functions:list \
+            --project "$FIREBASE_PROJECT" \
+            --non-interactive \
+            --token "$FIREBASE_TOKEN" \
+            | tee /tmp/fn-list.txt
+          for name in createSupportTicket reopenTicket addTicketToWorkQueue submitFeedback dailySupportInboxBacklogScan runSupportInboxBacklogScanNow; do
+            grep -qi "$name" /tmp/fn-list.txt || { echo "MISSING: $name"; exit 1; }
+          done
+          echo "All 6 support-inbox functions present."
