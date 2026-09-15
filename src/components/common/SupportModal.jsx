@@ -487,9 +487,13 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
     const hubSubtitle = nudgeSupportResponded
         ? 'Support has responded!'
         : meta.subtitle;
-    // Starting a new Support Ticket is hidden while one is already open (anti-flood) —
-    // the open conversation is shown inline instead (see chatVisible below).
-    const primaryHubOptions = hasOpenRequest ? [] : PRIMARY_OPTIONS;
+    // Always offer Support Ticket — each submit creates its own #Z### (see createSupportTicket).
+    // When a thread is already open, label it as a new request so it doesn't feel like a flood.
+    const primaryHubOptions = PRIMARY_OPTIONS.map((opt) => (
+        hasOpenRequest && opt.id === 'support'
+            ? { ...opt, title: 'New support request', description: 'Starts a separate ticket with its own support #' }
+            : opt
+    ));
     // An open support ticket is embedded inline, front and center — no separate
     // modal, no "continue conversation" prompt to click through.
     const chatVisible = showHistoryChat || shouldDeepLinkToChat;
@@ -643,7 +647,7 @@ export default function SupportModal({ open, onClose, theme, showBackButton = fa
 
                                                 <p className="text-sm opacity-55 px-0.5" style={{ color: theme.text }}>
                                                     {hasOpenRequest
-                                                        ? 'Browse help, or leave feedback below.'
+                                                        ? 'Reply in the thread above, or open a new request / leave feedback below.'
                                                         : 'Pick a path — we\u2019ll take it from there.'}
                                                 </p>
 

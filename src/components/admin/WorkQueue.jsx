@@ -7,7 +7,6 @@ import { db, functions } from '../../config/firebase';
 import { COLLECTIONS } from '../../config/collections';
 import { closeSupportTicketFromWorkQueue, updateFeedback, getAdminMessagesHistoryForEmail, replyToFeedbackViaTicket, subscribeToTicketMessages } from '../../services/firebase';
 import AdminLoader from './AdminLoader';
-import CustomDropdown from '../common/inputs/CustomDropdown';
 import UserReportsInbox from './UserReportsInbox';
 import WorkQueueToolsPanels from './WorkQueueToolsPanels';
 // Admin password removed — cloud functions verify admin via Firebase Auth email token
@@ -58,41 +57,6 @@ function auditScoreMatch(commitMsg, ticket) {
   for (const w of cTokens) { if (tTokens.has(w)) matches++; }
   return matches / Math.max(cTokens.size, tTokens.size);
 }
-
-// Quick response templates
-const QUICK_RESPONSES = [
-  {
-    id: 'working',
-    label: '🔧 Working On It',
-    message: "We're actively working on this and will update you as soon as we have more info!\n\nThe Pep Planner Team"
-  },
-  {
-    id: 'resolved',
-    label: '✅ Resolved!',
-    message: "Great news - this has been fixed! Give it a try and let us know if you run into anything else.\n\nThe Pep Planner Team"
-  },
-  {
-    id: 'need-info',
-    label: '❓ Need Info',
-    message: "Could you share a bit more detail? A screenshot or steps to reproduce would help us track this down faster.\n\nThe Pep Planner Team"
-  },
-  {
-    id: 'known-issue',
-    label: '🐛 Known Issue',
-    message: "We've identified this as a known issue and it's on our fix list. Thanks for the report - we'll update you when it's resolved!\n\nThe Pep Planner Team"
-  }
-];
-
-const plainStatusLabel = (id) => {
-  const res = QUICK_RESPONSES.find(r => r.id === id);
-  if (!res) return '';
-  return res.label.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
-};
-
-const ADMIN_STATUS_OPTIONS = [
-  { value: '', label: 'Set status' },
-  ...QUICK_RESPONSES.map(r => ({ value: r.id, label: plainStatusLabel(r.id) })),
-];
 
 // Tooltip component
 const Tooltip = ({ text, children }) => {
@@ -244,6 +208,8 @@ function logDocToItem(logDoc) {
     executionCost: cost,
     userAccountInfo: log.userAccountInfo || null,
     requestNumbers: Array.isArray(log.requestNumbers) ? log.requestNumbers : undefined,
+    feedbackId: log.feedbackId || null,
+    isFeedback: log.isFeedback === true,
   };
 }
 
@@ -1000,6 +966,9 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     const tickets = showHistory ? completedTickets : pendingTickets;
 
     for (const ticket of tickets) {
+      // Feedback queue rows are shown via feedbackItems (with proper resolve/review actions)
+      if (ticket.isFeedback || ticket.feedbackId) continue;
+
       const email = (ticket.userEmail || ticket.logId || 'unknown').trim().toLowerCase();
       const typeLabel =
         ticket.type === 'account_deletion_request' ? 'Deletion'
@@ -1041,10 +1010,11 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         const adminMarkedUnread = meta.adminMarkedUnread !== undefined
           ? meta.adminMarkedUnread
           : (f.adminMarkedUnread === true);
+        const feedbackNumber = `F-${String(f.id).slice(-6).toUpperCase()}`;
         items.push({
           kind: 'feedback',
           email: f._email || email,
-          ticketNumber: null,
+          ticketNumber: feedbackNumber,
           dateMs: d.getTime(),
           message: f._preview || f.message || f.feedback || '(no message)',
           typeLabel,
@@ -1065,6 +1035,7 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
             userEmail: f._email,
             timestamp: d,
             subject: f._preview,
+            ticketNumber: feedbackNumber,
             adminStatus,
             adminNotes,
             adminReadAt,
@@ -1315,74 +1286,6 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     }
   };
 
-  const handleCloseFromPanel = async () => {
-    if (!selectedQueueItem && !selectedUserEmail) return;
-    setClosingTicket(true);
-    try {
-      const email = (selectedUserEmail || selectedQueueItem?.email || '').trim().toLowerCase();
-      if (!email) return;
-
-      // Close every open report for this user (support + feedback), not just the selected one.
-      const groupItems = (allUnifiedItems || []).filter(
-        (i) => (i.email || '').trim().toLowerCase() === email
-      );
-      if (groupItems.length === 0) {
-        window.dispatchEvent(new CustomEvent('tpp:toast', {
-          detail: { message: 'No open reports to close for this user', type: 'info' },
-        }));
-        return;
-      }
-
-      const closedTicketIds = new Set();
-      let closedCount = 0;
-
-      for (const item of groupItems) {
-        if (item.kind === 'feedback') {
-          const fb = feedbackDocFromQueueItem(item);
-          if (fb?.id && onFeedbackMarkResolved) {
-            await onFeedbackMarkResolved(fb);
-            closedCount += 1;
-          }
-          continue;
-        }
-
-        const ticket = item.raw;
-        if (!ticket?.logId) continue;
-        const tid = ticket.ticketId || null;
-
-        // One cloud close per ticketId; still mark any extra log rows locally.
-        if (tid && closedTicketIds.has(tid)) {
-          await updateDoc(doc(db, COLLECTIONS.USER_REPORTS_QUEUE, ticket.logId), {
-            markedFixed: true,
-            markedFixedAt: serverTimestamp(),
-            ...(adminNotes ? { adminNotes } : {}),
-          });
-          applyClosedToLocalQueue(ticket);
-          closedCount += 1;
-          continue;
-        }
-
-        await closeTicketInline(ticket, null, { silent: true, notes: adminNotes });
-        if (tid) closedTicketIds.add(tid);
-        closedCount += 1;
-      }
-
-      returnToReportsList();
-      window.dispatchEvent(new CustomEvent('tpp:toast', {
-        detail: {
-          message: closedCount > 1
-            ? `Closed ${closedCount} reports for this user`
-            : 'Closed this user’s report',
-          type: 'success',
-        },
-      }));
-    } catch (err) {
-      window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: err?.message || 'Failed', type: 'error' } }));
-    } finally {
-      setClosingTicket(false);
-    }
-  };
-
   const handleDeleteFromPanel = async () => {
     if (!selectedQueueItem) return;
     setDeletingReport(true);
@@ -1419,61 +1322,12 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
     }
   };
 
-  const handleQuickResponse = (response) => {
-    const next = (adminStatus ?? selectedTicket?.adminStatus) === response.id ? null : response.id;
-    saveAdminStatus(next);
-    if (next) setCustomMessage(response.message);
-  };
-
   const selectedTicketRef = useRef(null);
   const selectedQueueItemRef = useRef(null);
   const workQueueRef = useRef(workQueue);
   useEffect(() => { selectedTicketRef.current = selectedTicket; }, [selectedTicket]);
   useEffect(() => { selectedQueueItemRef.current = selectedQueueItem; }, [selectedQueueItem]);
   useEffect(() => { workQueueRef.current = workQueue; }, [workQueue]);
-
-  const saveAdminStatus = async (status) => {
-    const ticket = selectedTicketRef.current;
-    const queueItem = selectedQueueItemRef.current;
-    if (!ticket && !queueItem) { console.warn('[saveAdminStatus] no ticket ref'); return; }
-    setAdminStatusLocal(status);
-    try {
-      if (queueItem?.kind === 'feedback' && queueItem.raw?.id) {
-        await updateFeedback(queueItem.raw.id, { adminStatus: status });
-        patchFeedbackMeta(queueItem.raw.id, { adminStatus: status });
-        setSelectedTicket((prev) => (prev ? { ...prev, adminStatus: status } : null));
-        setSelectedQueueItem((prev) => (prev ? { ...prev, adminStatus: status } : null));
-      } else if (ticket?.logId && !ticket?._isFeedback) {
-        const logRef = doc(db, COLLECTIONS.USER_REPORTS_QUEUE, ticket.logId);
-        await updateDoc(logRef, { adminStatus: status });
-        setWorkQueue((prev) =>
-          prev.map((t) => (t.logId === ticket.logId ? { ...t, adminStatus: status } : t))
-        );
-        setSelectedTicket((prev) => (prev ? { ...prev, adminStatus: status } : null));
-        setSelectedQueueItem((prev) => (prev ? { ...prev, adminStatus: status } : null));
-      }
-    } catch (error) {
-      console.error('[saveAdminStatus] failed:', error);
-    }
-  };
-
-  /** Update status from the list row without opening the modal */
-  const saveAdminStatusForTicket = async (ticket, status) => {
-    if (!ticket?.logId) return;
-    try {
-      const logRef = doc(db, COLLECTIONS.USER_REPORTS_QUEUE, ticket.logId);
-      await updateDoc(logRef, { adminStatus: status });
-      setWorkQueue(prev => prev.map(t =>
-        t.logId === ticket.logId ? { ...t, adminStatus: status } : t
-      ));
-      if (selectedTicket?.logId === ticket.logId) {
-        setSelectedTicket(prev => prev ? { ...prev, adminStatus: status } : null);
-        setAdminStatusLocal(status);
-      }
-    } catch (error) {
-      console.error('[saveAdminStatusForTicket] failed:', error);
-    }
-  };
 
   const saveLinkedCommits = async (commits) => {
     const ticket = selectedTicketRef.current;
@@ -1934,10 +1788,70 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
           return;
         }
         await onFeedbackMarkResolved(fb);
+        // Also clear matching auto-queued feedback rows from the work queue
+        try {
+          const q = query(
+            collection(db, COLLECTIONS.USER_REPORTS_QUEUE),
+            where('feedbackId', '==', fb.id)
+          );
+          const snap = await getDocs(q);
+          await Promise.all(
+            snap.docs.map((d) =>
+              updateDoc(d.ref, { markedFixed: true, markedFixedAt: serverTimestamp() })
+            )
+          );
+          if (!snap.empty) {
+            setWorkQueue((prev) => prev.filter((t) => t.feedbackId !== fb.id));
+          }
+        } catch (queueErr) {
+          console.warn('[closeQueueItem] feedback queue cleanup failed:', queueErr);
+        }
+        window.dispatchEvent(new CustomEvent('tpp:toast', {
+          detail: { message: `#${item.ticketNumber || 'F'} closed`, type: 'success' },
+        }));
       }
     } catch (err) {
       console.error('[closeQueueItem] failed:', err);
       window.dispatchEvent(new CustomEvent('tpp:toast', { detail: { message: err?.message || 'Action failed', type: 'error' } }));
+    }
+  };
+
+  /** Close only the selected report (its own support #), not every open report for the user. */
+  const handleCloseFromPanel = async () => {
+    if (!selectedQueueItem) return;
+    setClosingTicket(true);
+    try {
+      await closeQueueItem(selectedQueueItem);
+      setCloseArmed(false);
+    } finally {
+      setClosingTicket(false);
+    }
+  };
+
+  /** Close a specific report from the conversation divider (by ticketId or feedback id). */
+  const handleCloseFromThread = async ({ ticketId = null, feedbackId = null } = {}) => {
+    if (!ticketId && !feedbackId) return;
+    const email = (selectedUserEmail || '').trim().toLowerCase();
+    const candidates = (allUnifiedItems || []).filter(
+      (i) => (i.email || '').trim().toLowerCase() === email
+    );
+    const match = candidates.find((i) => {
+      if (ticketId && (i.raw?.ticketId === ticketId || i.raw?.linkedTicketId === ticketId)) return true;
+      if (feedbackId && (i.raw?.id === feedbackId || i.raw?._rawFeedback?.id === feedbackId)) return true;
+      return false;
+    });
+    if (!match) {
+      window.dispatchEvent(new CustomEvent('tpp:toast', {
+        detail: { message: 'Could not find that report in the open queue', type: 'info' },
+      }));
+      return;
+    }
+    setClosingTicket(true);
+    try {
+      await closeQueueItem(match);
+      setCloseArmed(false);
+    } finally {
+      setClosingTicket(false);
     }
   };
 
@@ -2140,11 +2054,6 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         setShowTools={setShowTools}
         toolsContent={toolsContent}
         reopenedBanner={reopenedBanner}
-        adminStatus={adminStatus ?? selectedTicket?.adminStatus}
-        adminStatusOptions={ADMIN_STATUS_OPTIONS}
-        onStatusChange={saveAdminStatus}
-        quickResponses={QUICK_RESPONSES}
-        onQuickResponse={handleQuickResponse}
         customMessage={customMessage}
         setCustomMessage={setCustomMessage}
         onSendReply={handleSendReplyUnified}
@@ -2153,6 +2062,7 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         setAdminNotes={setAdminNotes}
         savingNotes={saving}
         onCloseTicket={handleCloseFromPanel}
+        onCloseFromThread={handleCloseFromThread}
         closingTicket={closingTicket || sending}
         closeArmed={closeArmed}
         setCloseArmed={setCloseArmed}
@@ -2167,7 +2077,6 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
         selectedIsUnread={Boolean(selectedQueueItem?.unread)}
         isFeedback={isFeedbackSelected}
         conversationEndRef={conversationEndRef}
-        plainStatusLabel={plainStatusLabel}
         selectedUser={selectedUser}
         hasSelectedUser={hasSelectedUser}
         isLoadingUserDetails={isLoadingUserDetails}
