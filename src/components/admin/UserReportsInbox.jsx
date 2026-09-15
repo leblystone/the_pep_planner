@@ -165,13 +165,16 @@ export function TypePill({ typeLabel }) {
 }
 
 export function ConfirmChip({ label, confirmLabel, armed, onArm, onConfirm, loading, variant = 'danger' }) {
+  const idleStyle = variant === 'success'
+    ? { color: '#166534', borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }
+    : { color: '#991B1B', borderColor: '#FECACA', backgroundColor: '#FEF2F2' };
   return (
     <ChipButton
       variant={armed ? variant : 'default'}
       active={armed}
       loading={loading}
       onClick={() => (armed ? onConfirm() : onArm())}
-      style={armed ? {} : { color: '#991B1B', borderColor: '#FECACA', backgroundColor: '#FEF2F2' }}
+      style={armed ? {} : idleStyle}
     >
       {armed ? confirmLabel : label}
     </ChipButton>

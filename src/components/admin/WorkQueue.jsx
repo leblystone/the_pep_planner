@@ -1788,6 +1788,27 @@ export default function WorkQueue({ theme, feedbackItems, onFeedbackMarkReviewed
           return;
         }
         await onFeedbackMarkResolved(fb);
+        // Also clear matching auto-queued feedback rows from the work queue
+        try {
+          const q = query(
+            collection(db, COLLECTIONS.USER_REPORTS_QUEUE),
+            where('feedbackId', '==', fb.id)
+          );
+          const snap = await getDocs(q);
+          await Promise.all(
+            snap.docs.map((d) =>
+              updateDoc(d.ref, { markedFixed: true, markedFixedAt: serverTimestamp() })
+            )
+          );
+          if (!snap.empty) {
+            setWorkQueue((prev) => prev.filter((t) => t.feedbackId !== fb.id));
+          }
+        } catch (queueErr) {
+          console.warn('[closeQueueItem] feedback queue cleanup failed:', queueErr);
+        }
+        window.dispatchEvent(new CustomEvent('tpp:toast', {
+          detail: { message: `#${item.ticketNumber || 'F'} closed`, type: 'success' },
+        }));
       }
     } catch (err) {
       console.error('[closeQueueItem] failed:', err);
