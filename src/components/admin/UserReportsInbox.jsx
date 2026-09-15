@@ -1,10 +1,9 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
-  CircleNotch, PaperPlaneTilt, CheckCircle, ChatCircle, MagnifyingGlass, Plus, GitCommit,
-  CaretDown, CaretUp, CaretLeft, CaretRight, User, ShieldCheck, X, ArrowSquareOut, Wrench, List,
-  EnvelopeSimple, Bug, Lightbulb, Lifebuoy, Trash, ArrowLeft, Smiley, Clock,
+  CircleNotch, PaperPlaneTilt, CheckCircle, ChatCircle, MagnifyingGlass,
+  CaretDown, CaretUp, CaretLeft, CaretRight, User, ShieldCheck, X, Wrench, List,
+  EnvelopeSimple, Bug, Lightbulb, Lifebuoy, Trash, ArrowLeft, Smiley, Clock, NotePencil,
 } from '@phosphor-icons/react';
-import CustomDropdown from '../common/inputs/CustomDropdown';
 import { UserDetailPanel } from './UserDetailModal';
 import { AdminSpinner } from './adminUi';
 
@@ -13,13 +12,6 @@ export const TYPE_PILL = {
   Suggestion: { bg: '#D1FAE5', color: '#065F46', icon: Lightbulb },
   Support: { bg: '#DBEAFE', color: '#1D4ED8', icon: Lifebuoy },
   Deletion: { bg: '#FFEDD5', color: '#C2410C', icon: Trash },
-};
-
-const STATUS_PILL = {
-  working: { label: 'Working on it', bg: '#FEF3C7', color: '#B45309' },
-  'need-info': { label: 'Waiting for info', bg: '#E0E7FF', color: '#4338CA' },
-  'known-issue': { label: 'Known issue', bg: '#FEE2E2', color: '#B91C1C' },
-  resolved: { label: 'Resolved', bg: '#D1FAE5', color: '#047857' },
 };
 
 export function ChipButton({
@@ -208,11 +200,6 @@ export default function UserReportsInbox({
   setShowTools,
   toolsContent,
   reopenedBanner,
-  adminStatus,
-  adminStatusOptions,
-  onStatusChange,
-  quickResponses,
-  onQuickResponse,
   customMessage,
   setCustomMessage,
   onSendReply,
@@ -221,6 +208,7 @@ export default function UserReportsInbox({
   setAdminNotes,
   savingNotes,
   onCloseTicket,
+  onCloseFromThread,
   closingTicket,
   closeArmed,
   setCloseArmed,
@@ -235,7 +223,6 @@ export default function UserReportsInbox({
   selectedIsUnread,
   isFeedback,
   conversationEndRef,
-  plainStatusLabel,
   selectedUser = null,
   hasSelectedUser = false,
   isLoadingUserDetails = false,
@@ -249,8 +236,9 @@ export default function UserReportsInbox({
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [accountExpanded, setAccountExpanded] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [listSearch, setListSearch] = useState('');
-  /** Quick filter from summary cards: all | unread | bug | support | recent7 */
+  /** Quick filter from summary cards: all | unread | bug | suggestion | support | recent7 */
   const [quickFilter, setQuickFilter] = useState('all');
   const [isNarrow, setIsNarrow] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
@@ -265,12 +253,6 @@ export default function UserReportsInbox({
     return () => mq.removeEventListener?.('change', onChange);
   }, []);
 
-  // Desktop only: Account expand can collapse the list to free space
-  useEffect(() => {
-    if (accountExpanded && !isNarrow) setLeftPanelCollapsed(true);
-  }, [accountExpanded, isNarrow]);
-
-  const accountFocusMode = accountExpanded && isNarrow;
   const showListPane = !isNarrow || !selectedUserEmail;
   const showDetailPane = !isNarrow || Boolean(selectedUserEmail);
 
@@ -289,6 +271,7 @@ export default function UserReportsInbox({
     setLeftPanelCollapsed(false);
     setAccountExpanded(false);
     setMobileToolsOpen(false);
+    setNotesOpen(false);
   }, [onAccountClose, onSelectUser]);
 
   useEffect(() => {
@@ -298,6 +281,7 @@ export default function UserReportsInbox({
   useEffect(() => {
     setAccountExpanded(false);
     setMobileToolsOpen(false);
+    setNotesOpen(false);
   }, [selectedUserEmail]);
 
   // Reset desktop collapse when switching to narrow drill-down
@@ -309,6 +293,165 @@ export default function UserReportsInbox({
     item.kind === 'feedback' ? `fb-${item.raw?.id}` : `sq-${item.raw?.logId}`;
 
   const selectedKey = selectedQueueItem ? itemKey(selectedQueueItem) : null;
+
+  useEffect(() => {
+    setNotesOpen(false);
+    setCloseArmed(false);
+  }, [selectedKey, setCloseArmed]);
+
+  const hasExistingNotes = Boolean(typeof adminNotes === 'string' && adminNotes.trim());
+  const closeLabel = selectedQueueItem?.ticketNumber
+    ? `Close #${selectedQueueItem.ticketNumber}`
+    : 'Close report';
+  const closeConfirmLabel = selectedQueueItem?.ticketNumber
+    ? `Tap again to close #${selectedQueueItem.ticketNumber}`
+    : 'Tap again to close this report';
+
+  const renderNotesBlock = (compact = false) => {
+    if (!selectedQueueItem) return null;
+    if (!notesOpen && !hasExistingNotes) {
+      return (
+        <ChipButton
+          onClick={() => setNotesOpen(true)}
+          style={{ padding: compact ? '5px 10px' : '6px 12px', fontSize: '11px' }}
+          title="Add an internal note"
+        >
+          <NotePencil size={14} />
+          Add a note
+        </ChipButton>
+      );
+    }
+    if (!notesOpen && hasExistingNotes) {
+      return (
+        <button
+          type="button"
+          onClick={() => setNotesOpen(true)}
+          title="Edit note"
+          style={{
+            width: '100%',
+            textAlign: 'left',
+            padding: '8px 10px',
+            borderRadius: 8,
+            border: `1px solid ${t.border}`,
+            backgroundColor: t.background || '#F9FAFB',
+            cursor: 'pointer',
+            font: 'inherit',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: t.textLight, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <NotePencil size={12} /> Note
+            </span>
+            <span style={{ fontSize: 10, color: t.primary, fontWeight: 600 }}>Edit</span>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: t.text, lineHeight: 1.45, whiteSpace: 'pre-wrap',
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {adminNotes}
+          </p>
+        </button>
+      );
+    }
+    return (
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: t.textLight }}>Internal note</label>
+          <button
+            type="button"
+            onClick={() => setNotesOpen(false)}
+            style={{ border: 'none', background: 'none', color: t.textLight, fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+          >
+            Done
+          </button>
+        </div>
+        <textarea
+          value={adminNotes}
+          onChange={(e) => setAdminNotes(e.target.value)}
+          rows={compact ? 3 : 4}
+          autoFocus
+          placeholder="Where you left off, what you’re waiting on…"
+          style={{
+            width: '100%',
+            padding: '8px 10px',
+            borderRadius: 8,
+            border: `1px solid ${t.border}`,
+            fontSize: 12,
+            lineHeight: 1.5,
+            color: t.text,
+            backgroundColor: compact ? (t.background || '#F9FAFB') : t.cardBackground,
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            fontFamily: 'inherit',
+          }}
+        />
+        {savingNotes && (
+          <span style={{ fontSize: 10, color: t.primary, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <CircleNotch size={10} style={{ animation: 'spin 1s linear infinite' }} /> Saving…
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const renderReportActions = ({ forMobileSheet = false } = {}) => {
+    if (!selectedQueueItem) {
+      return (
+        <p style={{ fontSize: 12, color: t.textLight, margin: 0 }}>
+          {forMobileSheet ? 'Select a report first.' : 'Loading reports…'}
+        </p>
+      );
+    }
+    const isClosed = Boolean(selectedTicket?.markedFixed) || showHistory;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {!isClosed && (
+            <ConfirmChip
+              label={closeLabel}
+              confirmLabel={closeConfirmLabel}
+              armed={closeArmed}
+              onArm={() => setCloseArmed(true)}
+              onConfirm={onCloseTicket}
+              loading={closingTicket}
+              variant="success"
+            />
+          )}
+          {isFeedback && selectedQueueItem.feedbackStatus === 'new' && onMarkReviewed && (
+            <ChipButton loading={markingReviewed} onClick={onMarkReviewed} style={{ fontSize: 11 }}>
+              Mark reviewed
+            </ChipButton>
+          )}
+          {selectedIsUnread && onMarkRead && (
+            <ChipButton onClick={onMarkRead} style={{ fontSize: 11 }} title="Mark as read">
+              Mark read
+            </ChipButton>
+          )}
+          {!selectedIsUnread && onMarkUnread && (
+            <ChipButton onClick={onMarkUnread} style={{ fontSize: 11 }} title="Mark as unread">
+              Mark unread
+            </ChipButton>
+          )}
+        </div>
+
+        {renderNotesBlock(forMobileSheet)}
+
+        {onDelete && (
+          <div style={{ paddingTop: 4, borderTop: `1px solid ${t.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#991B1B', marginBottom: 8, textTransform: 'uppercase' }}>
+              Danger zone
+            </div>
+            <ConfirmChip
+              label={selectedQueueItem.typeLabel === 'Deletion' ? 'Process deletion' : 'Delete report'}
+              confirmLabel="Tap again to delete"
+              armed={deleteArmed}
+              onArm={() => setDeleteArmed(true)}
+              onConfirm={onDelete}
+              loading={deleting}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ── Helpers mirrored from SupportChatModal ──────────────────────────────────
   const tsToMs = (ts) => {
@@ -353,11 +496,13 @@ export default function UserReportsInbox({
   const quickCounts = useMemo(() => {
     let unread = 0;
     let bug = 0;
+    let suggestion = 0;
     let support = 0;
     let recent7 = 0;
     for (const item of poolItems) {
       if (item.unread) unread += 1;
       if (item.typeCategory === 'bug') bug += 1;
+      if (item.typeCategory === 'suggestion') suggestion += 1;
       if (item.typeCategory === 'support') support += 1;
       if ((item.dateMs || 0) >= sevenDaysAgoMs) recent7 += 1;
     }
@@ -365,6 +510,7 @@ export default function UserReportsInbox({
       all: poolItems.length,
       unread,
       bug,
+      suggestion,
       support,
       recent7,
     };
@@ -373,6 +519,7 @@ export default function UserReportsInbox({
   const scopedItems = useMemo(() => {
     if (quickFilter === 'unread') return poolItems.filter((item) => item.unread);
     if (quickFilter === 'bug') return poolItems.filter((item) => item.typeCategory === 'bug');
+    if (quickFilter === 'suggestion') return poolItems.filter((item) => item.typeCategory === 'suggestion');
     if (quickFilter === 'support') return poolItems.filter((item) => item.typeCategory === 'support');
     if (quickFilter === 'recent7') return poolItems.filter((item) => (item.dateMs || 0) >= sevenDaysAgoMs);
     return poolItems;
@@ -456,6 +603,8 @@ export default function UserReportsInbox({
         items.push({
           type: 'divider',
           key: `divider-${msg._ticketId || i}-${items.length}`,
+          ticketId: msg._ticketId || null,
+          feedbackId: msg._feedbackId || null,
           ticketNumber: msg._ticketNumber,
           ticketType: msg._ticketType,
           ticketStatus: msg._ticketStatus,
@@ -478,6 +627,8 @@ export default function UserReportsInbox({
       items.push({
         type: 'divider',
         key: `divider-fb-${fbId || item.dateMs}`,
+        ticketId: linked || null,
+        feedbackId: fbId || null,
         ticketNumber: item.ticketNumber || null,
         ticketType: typeKey,
         ticketStatus: item.feedbackStatus || 'new',
@@ -747,6 +898,14 @@ export default function UserReportsInbox({
                 active: quickFilter === 'bug',
               },
               {
+                key: 'suggestion',
+                label: 'Features',
+                value: quickCounts.suggestion,
+                color: '#065F46',
+                Icon: Lightbulb,
+                active: quickFilter === 'suggestion',
+              },
+              {
                 key: 'support',
                 label: 'Support',
                 value: quickCounts.support,
@@ -957,43 +1116,28 @@ export default function UserReportsInbox({
       </div>
       )}
 
-      {/* ═══ COL 2 — Ticket Cards + Actions (compact header on mobile) ═══ */}
+      {/* ═══ COL 2 — Report switcher + slim actions ═══ */}
       {showDetailPane && !listOnlyDesktop && (
       <div
         style={{
-          flex: stackDetailPanes
-            ? '0 0 auto'
-            : accountFocusMode
-              ? '1 1 auto'
-              : '0 0 320px',
-          width: stackDetailPanes
-            ? '100%'
-            : accountFocusMode
-              ? '100%'
-              : (accountExpanded ? 'min(380px, 36vw)' : '320px'),
-          minWidth: stackDetailPanes || accountFocusMode ? 0 : 280,
-          maxWidth: stackDetailPanes
-            ? '100%'
-            : accountFocusMode
-              ? undefined
-              : 380,
-          flexShrink: stackDetailPanes ? 0 : 0,
+          flex: stackDetailPanes ? '0 0 auto' : '0 0 300px',
+          width: stackDetailPanes ? '100%' : '300px',
+          minWidth: stackDetailPanes ? 0 : 260,
+          maxWidth: stackDetailPanes ? '100%' : 320,
+          flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
-          transition: stackDetailPanes ? 'none' : 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1), flex 0.22s ease',
           minHeight: 0,
-          maxHeight: stackDetailPanes && !accountExpanded ? 'none' : undefined,
           position: stackDetailPanes ? 'relative' : undefined,
           zIndex: stackDetailPanes ? 2 : undefined,
           ...panelCardStyle,
           backgroundColor: t.background || '#F9FAFB',
         }}
       >
-        {/* Ticket actions — compact on mobile, full toolbar on desktop */}
         {isNarrow && selectedUserEmail ? (
           <div
             style={{
-              padding: '8px 10px',
+              padding: '10px 12px',
               borderBottom: `1px solid ${t.border}`,
               flexShrink: 0,
               display: 'flex',
@@ -1043,103 +1187,66 @@ export default function UserReportsInbox({
               </div>
               <ChipButton
                 active={mobileToolsOpen}
-                onClick={() => {
-                  setAccountExpanded(false);
-                  setMobileToolsOpen((v) => !v);
-                }}
+                onClick={() => setMobileToolsOpen((v) => !v)}
                 style={{ padding: '8px 10px', fontSize: 11, flexShrink: 0 }}
-                title="Admin tools"
+                title="Report actions"
               >
                 <Wrench size={14} />
                 Tools
               </ChipButton>
               <ChipButton
                 active={accountExpanded}
-                onClick={() => {
-                  setMobileToolsOpen(false);
-                  setAccountExpanded((v) => !v);
-                }}
+                onClick={() => setAccountExpanded(true)}
                 style={{ padding: '8px 10px', fontSize: 11, flexShrink: 0 }}
                 title="Account tools"
               >
                 <User size={14} weight={accountExpanded ? 'fill' : 'duotone'} />
               </ChipButton>
             </div>
-            {!accountExpanded && (
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 6,
-                  overflowX: 'auto',
-                  WebkitOverflowScrolling: 'touch',
-                  paddingBottom: 2,
-                }}
-              >
-                {(selectedGroup?.items || []).map((item) => {
-                  const key = itemKey(item);
-                  const isSelected = key === selectedKey;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => onSelectItem(item)}
-                      title={item.message}
-                      style={{
-                        flex: '0 0 auto',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        padding: '5px 9px',
-                        borderRadius: 999,
-                        border: `1px solid ${isSelected ? t.primary : t.border}`,
-                        backgroundColor: isSelected ? `${t.primary}18` : t.background || '#F9FAFB',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {item.unread && (
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: t.primary, flexShrink: 0 }} />
-                      )}
-                      <TypePill typeLabel={item.typeLabel} />
-                      {item.ticketNumber && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: t.textLight }}>#{item.ticketNumber}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div
+              style={{
+                display: 'flex',
+                gap: 6,
+                overflowX: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                paddingBottom: 2,
+              }}
+            >
+              {(selectedGroup?.items || []).map((item) => {
+                const key = itemKey(item);
+                const isSelected = key === selectedKey;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => onSelectItem(item)}
+                    title={item.message}
+                    style={{
+                      flex: '0 0 auto',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '5px 9px',
+                      borderRadius: 999,
+                      border: `1px solid ${isSelected ? t.primary : t.border}`,
+                      backgroundColor: isSelected ? `${t.primary}18` : t.background || '#F9FAFB',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {item.unread && (
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: t.primary, flexShrink: 0 }} />
+                    )}
+                    <TypePill typeLabel={item.typeLabel} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: isSelected ? t.primary : t.textLight }}>
+                      {item.ticketNumber ? `#${item.ticketNumber}` : 'New'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
             {reopenedBanner}
           </div>
-        ) : (
-          <div style={{ padding: '8px 12px', borderBottom: `1px solid ${t.border}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {selectedQueueItem && !selectedTicket?.markedFixed && (
-              <ConfirmChip
-                label="Close all"
-                confirmLabel="Tap again to close all reports"
-                armed={closeArmed}
-                onArm={() => setCloseArmed(true)}
-                onConfirm={onCloseTicket}
-                loading={closingTicket}
-                variant="success"
-              />
-            )}
-            {selectedQueueItem && isFeedback && selectedQueueItem.feedbackStatus === 'new' && onMarkReviewed && (
-              <ChipButton loading={markingReviewed} onClick={onMarkReviewed} style={{ fontSize: '11px' }}>
-                Mark reviewed
-              </ChipButton>
-            )}
-            {selectedQueueItem && selectedIsUnread && onMarkRead && (
-              <ChipButton onClick={onMarkRead} style={{ fontSize: '11px' }} title="Mark as read">
-                Mark read
-              </ChipButton>
-            )}
-            {selectedQueueItem && !selectedIsUnread && onMarkUnread && (
-              <ChipButton onClick={onMarkUnread} style={{ fontSize: '11px' }} title="Mark as unread">
-                Mark unread
-              </ChipButton>
-            )}
-          </div>
-        )}
+        ) : null}
         {!isNarrow && reopenedBanner}
 
         {!selectedUserEmail ? (
@@ -1147,61 +1254,8 @@ export default function UserReportsInbox({
             <ChatCircle size={32} style={{ opacity: 0.2, marginBottom: '10px' }} />
             <p style={{ fontSize: '13px', fontWeight: '500', margin: 0, textAlign: 'center' }}>Select a user to view their reports</p>
           </div>
-        ) : isNarrow ? (
-          /* Mobile: chat-first — account tools expand here; admin tools open as a sheet */
-          accountExpanded ? (
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                maxHeight: '100%',
-                overflowY: 'auto',
-                overscrollBehavior: 'contain',
-              }}
-            >
-              <div style={{ padding: '10px 12px', borderBottom: `1px solid ${t.border}` }}>
-                <ChipButton
-                  active={false}
-                  onClick={() => setAccountExpanded(false)}
-                  style={{ width: '100%', justifyContent: 'center', padding: '8px 12px', fontSize: 12 }}
-                  title="Return to conversation"
-                >
-                  <ChatCircle size={14} />
-                  Back to conversation
-                </ChipButton>
-              </div>
-              {isLoadingUserDetails && !hasSelectedUser && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 0' }}>
-                  <AdminSpinner size={24} />
-                </div>
-              )}
-              {userSelectionError && !hasSelectedUser && (
-                <p style={{ padding: '12px 14px', fontSize: '12px', margin: 0, color: t.error || '#EF4444' }}>
-                  {userSelectionError}
-                </p>
-              )}
-              {!hasSelectedUser && !isLoadingUserDetails && !userSelectionError && (
-                <p style={{ padding: '16px 14px', fontSize: '12px', textAlign: 'center', color: t.textLight, margin: 0 }}>
-                  Select a report to load account tools
-                </p>
-              )}
-              {hasSelectedUser && selectedUser && (
-                <UserDetailPanel
-                  user={selectedUser}
-                  onClose={onAccountClose}
-                  theme={t}
-                  compact
-                  reportContext={activeReportContext}
-                  onExtendTrial={onExtendTrial}
-                  isExtendingTrial={isExtendingTrial}
-                  isLoadingDetails={isLoadingUserDetails}
-                />
-              )}
-            </div>
-          ) : null
-        ) : (
+        ) : !isNarrow ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            {/* User header */}
             <div style={{ padding: '12px 14px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                 {leftPanelCollapsed && (
@@ -1229,6 +1283,15 @@ export default function UserReportsInbox({
                 <div style={{ fontSize: '13px', fontWeight: '700', color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   {selectedGroup?.email || selectedUserEmail}
                 </div>
+                <ChipButton
+                  active={accountExpanded}
+                  onClick={() => setAccountExpanded(true)}
+                  style={{ padding: '5px 10px', fontSize: 11, flexShrink: 0 }}
+                  title="Open account tools"
+                >
+                  <User size={14} weight="duotone" />
+                  Account
+                </ChipButton>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 {selectedQueueItem && (() => {
@@ -1245,88 +1308,14 @@ export default function UserReportsInbox({
               </div>
             </div>
 
-            {/* Account — collapsed by default; expands in place of report list */}
-            <div
-              style={{
-                padding: '0 14px 10px',
-                borderBottom: `1px solid ${t.border}`,
-                flexShrink: 0,
-              }}
-            >
-              <ChipButton
-                active={accountExpanded}
-                onClick={() => setAccountExpanded((v) => !v)}
-                style={{
-                  width: '100%',
-                  justifyContent: 'space-between',
-                  padding: '6px 12px',
-                  fontSize: '11px',
-                }}
-                title={accountExpanded ? 'Hide account tools and show reports' : 'Show account tools (sync, grants)'}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <User size={14} weight={accountExpanded ? 'fill' : 'duotone'} />
-                  Account
-                </span>
-                {accountExpanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
-              </ChipButton>
-              {accountExpanded && (
-                <p style={{ margin: '6px 0 0', fontSize: '10px', color: t.textLight, lineHeight: 1.4 }}>
-                  Auto-loaded from report — sync or grant here
-                </p>
-              )}
-            </div>
-
-            {accountExpanded ? (
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  maxHeight: '100%',
-                  overflowY: 'auto',
-                  overscrollBehavior: 'contain',
-                }}
-              >
-                {isLoadingUserDetails && !hasSelectedUser && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 0' }}>
-                    <AdminSpinner size={24} />
-                  </div>
-                )}
-                {userSelectionError && !hasSelectedUser && (
-                  <p style={{ padding: '12px 14px', fontSize: '12px', margin: 0, color: t.error || '#EF4444' }}>
-                    {userSelectionError}
-                  </p>
-                )}
-                {!hasSelectedUser && !isLoadingUserDetails && !userSelectionError && (
-                  <p style={{ padding: '16px 14px', fontSize: '12px', textAlign: 'center', color: t.textLight, margin: 0 }}>
-                    Select a report to load account tools
-                  </p>
-                )}
-                {hasSelectedUser && selectedUser && (
-                  <UserDetailPanel
-                    user={selectedUser}
-                    onClose={onAccountClose}
-                    theme={t}
-                    compact
-                    reportContext={activeReportContext}
-                    onExtendTrial={onExtendTrial}
-                    isExtendingTrial={isExtendingTrial}
-                    isLoadingDetails={isLoadingUserDetails}
-                  />
-                )}
-              </div>
-            ) : (
-            /* Compact report chips + action controls (chat is the blended timeline) */
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               <div
                 style={{
                   display: 'flex',
+                  flexDirection: 'column',
                   gap: '6px',
                   padding: '10px 14px',
                   borderBottom: `1px solid ${t.border}`,
-                  overflowX: 'auto',
-                  flexShrink: 0,
-                  WebkitOverflowScrolling: 'touch',
                 }}
               >
                 {(selectedGroup?.items || []).map((item) => {
@@ -1339,125 +1328,43 @@ export default function UserReportsInbox({
                       onClick={() => onSelectItem(item)}
                       title={item.message}
                       style={{
-                        flex: '0 0 auto',
-                        display: 'inline-flex',
+                        display: 'flex',
                         alignItems: 'center',
-                        gap: '5px',
-                        padding: '6px 10px',
-                        borderRadius: '999px',
+                        gap: '8px',
+                        padding: '8px 10px',
+                        borderRadius: '10px',
                         border: `1px solid ${isSelected ? t.primary : t.border}`,
-                        backgroundColor: isSelected ? `${t.primary}18` : t.cardBackground,
+                        backgroundColor: isSelected ? `${t.primary}12` : t.cardBackground,
                         cursor: 'pointer',
-                        maxWidth: '220px',
+                        textAlign: 'left',
+                        font: 'inherit',
+                        width: '100%',
                       }}
                     >
                       {item.unread && (
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: t.primary, flexShrink: 0 }} />
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: t.primary, flexShrink: 0 }} />
                       )}
                       <TypePill typeLabel={item.typeLabel} />
-                      {item.ticketNumber && (
-                        <span style={{ fontSize: '10px', fontWeight: 700, color: t.textLight }}>#{item.ticketNumber}</span>
-                      )}
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: isSelected ? t.primary : t.text, flexShrink: 0 }}>
+                        {item.ticketNumber ? `#${item.ticketNumber}` : 'New'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: t.textLight, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                        {item.message || item.subject || ''}
+                      </span>
                     </button>
                   );
                 })}
               </div>
 
-              {/* Action controls for selected report context */}
-              {!selectedQueueItem ? (
-                <div style={{ padding: '20px 14px', textAlign: 'center', color: t.textLight, fontSize: '12px' }}>
-                  Loading reports…
-                </div>
-              ) : (
-                <div style={{ padding: '14px' }}>
-                  <div style={{ marginBottom: '14px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: '600', color: t.textLight, display: 'block', marginBottom: '5px' }}>
-                      Internal status
-                    </label>
-                    <CustomDropdown
-                      value={adminStatus || ''}
-                      onChange={(val) => onStatusChange(val || null)}
-                      options={adminStatusOptions}
-                      placeholder="Set status"
-                      theme={t}
-                      outlined
-                      customShadow
-                    />
-                    <p style={{ margin: '6px 0 0', fontSize: '10px', color: t.textLight, lineHeight: 1.4 }}>
-                      Working on it · Waiting for info · Known issue — just for you, not sent to the user
-                    </p>
-                  </div>
-
-                  <div style={{ marginBottom: '12px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: '600', color: t.textLight, display: 'block', marginBottom: '6px' }}>Quick replies</label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                      {quickResponses.map((response) => (
-                        <ChipButton
-                          key={response.id}
-                          active={(adminStatus || selectedTicket?.adminStatus) === response.id}
-                          onClick={() => onQuickResponse(response)}
-                          style={{ padding: '3px 9px', fontSize: '11px' }}
-                        >
-                          {response.label.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim()}
-                        </ChipButton>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: '14px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: '600', color: t.textLight, display: 'block', marginBottom: '5px' }}>
-                      Internal notes
-                    </label>
-                    <textarea
-                      value={adminNotes}
-                      onChange={(e) => setAdminNotes(e.target.value)}
-                      rows={3}
-                      placeholder="Where you left off, what you’re waiting on…"
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        border: `1px solid ${t.border}`,
-                        fontSize: '12px',
-                        lineHeight: 1.5,
-                        color: t.text,
-                        backgroundColor: t.cardBackground,
-                        resize: 'vertical',
-                        boxSizing: 'border-box',
-                        fontFamily: 'inherit',
-                      }}
-                    />
-                    {savingNotes && (
-                      <span style={{ fontSize: '10px', color: t.primary, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <CircleNotch size={10} style={{ animation: 'spin 1s linear infinite' }} /> Saving…
-                      </span>
-                    )}
-                  </div>
-
-                  {onDelete && (
-                    <div style={{ paddingTop: '12px', borderTop: `1px solid ${t.border}`, marginTop: '6px' }}>
-                      <div style={{ fontSize: '10px', fontWeight: '700', color: '#991B1B', marginBottom: '8px', textTransform: 'uppercase' }}>
-                        Danger zone
-                      </div>
-                      <ConfirmChip
-                        label={selectedQueueItem.typeLabel === 'Deletion' ? 'Process deletion' : 'Delete report'}
-                        confirmLabel="Tap again to delete"
-                        armed={deleteArmed}
-                        onArm={() => setDeleteArmed(true)}
-                        onConfirm={onDelete}
-                        loading={deleting}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+              <div style={{ padding: '14px' }}>
+                {renderReportActions()}
+              </div>
             </div>
-            )}
           </div>
-        )}
+        ) : null}
 
-        {/* Mobile admin tools sheet — keeps chat viewport clean */}
-        {isNarrow && selectedUserEmail && mobileToolsOpen && !accountExpanded && (
+        {/* Mobile tools sheet */}
+        {isNarrow && selectedUserEmail && mobileToolsOpen && (
           <div
             style={{
               position: 'fixed',
@@ -1473,7 +1380,7 @@ export default function UserReportsInbox({
           >
             <div
               role="dialog"
-              aria-label="Admin tools"
+              aria-label="Report actions"
               onClick={(e) => e.stopPropagation()}
               style={{
                 maxHeight: '78vh',
@@ -1487,7 +1394,9 @@ export default function UserReportsInbox({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Admin tools</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>
+                  {selectedQueueItem?.ticketNumber ? `Report #${selectedQueueItem.ticketNumber}` : 'Report actions'}
+                </div>
                 <button
                   type="button"
                   onClick={() => setMobileToolsOpen(false)}
@@ -1508,120 +1417,7 @@ export default function UserReportsInbox({
                   <X size={16} />
                 </button>
               </div>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-                {selectedQueueItem && !selectedTicket?.markedFixed && (
-                  <ConfirmChip
-                    label="Close all"
-                    confirmLabel="Tap again to close all reports"
-                    armed={closeArmed}
-                    onArm={() => setCloseArmed(true)}
-                    onConfirm={onCloseTicket}
-                    loading={closingTicket}
-                    variant="success"
-                  />
-                )}
-                {selectedQueueItem && isFeedback && selectedQueueItem.feedbackStatus === 'new' && onMarkReviewed && (
-                  <ChipButton loading={markingReviewed} onClick={onMarkReviewed} style={{ fontSize: 11 }}>
-                    Mark reviewed
-                  </ChipButton>
-                )}
-                {selectedQueueItem && selectedIsUnread && onMarkRead && (
-                  <ChipButton onClick={onMarkRead} style={{ fontSize: 11 }}>
-                    Mark read
-                  </ChipButton>
-                )}
-                {selectedQueueItem && !selectedIsUnread && onMarkUnread && (
-                  <ChipButton onClick={onMarkUnread} style={{ fontSize: 11 }}>
-                    Mark unread
-                  </ChipButton>
-                )}
-              </div>
-
-              {!selectedQueueItem ? (
-                <p style={{ fontSize: 12, color: t.textLight, margin: 0 }}>Select a report first.</p>
-              ) : (
-                <>
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: t.textLight, display: 'block', marginBottom: 5 }}>
-                      Internal status
-                    </label>
-                    <CustomDropdown
-                      value={adminStatus || ''}
-                      onChange={(val) => onStatusChange(val || null)}
-                      options={adminStatusOptions}
-                      placeholder="Set status"
-                      theme={t}
-                      outlined
-                      customShadow
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: t.textLight, display: 'block', marginBottom: 6 }}>
-                      Quick replies
-                    </label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                      {quickResponses.map((response) => (
-                        <ChipButton
-                          key={response.id}
-                          active={(adminStatus || selectedTicket?.adminStatus) === response.id}
-                          onClick={() => onQuickResponse(response)}
-                          style={{ padding: '5px 10px', fontSize: 11 }}
-                        >
-                          {response.label.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim()}
-                        </ChipButton>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: t.textLight, display: 'block', marginBottom: 5 }}>
-                      Internal notes
-                    </label>
-                    <textarea
-                      value={adminNotes}
-                      onChange={(e) => setAdminNotes(e.target.value)}
-                      rows={3}
-                      placeholder="Where you left off, what you’re waiting on…"
-                      style={{
-                        width: '100%',
-                        padding: '8px 10px',
-                        borderRadius: 8,
-                        border: `1px solid ${t.border}`,
-                        fontSize: 12,
-                        lineHeight: 1.5,
-                        color: t.text,
-                        backgroundColor: t.background || '#F9FAFB',
-                        resize: 'vertical',
-                        boxSizing: 'border-box',
-                        fontFamily: 'inherit',
-                      }}
-                    />
-                    {savingNotes && (
-                      <span style={{ fontSize: 10, color: t.primary, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <CircleNotch size={10} style={{ animation: 'spin 1s linear infinite' }} /> Saving…
-                      </span>
-                    )}
-                  </div>
-
-                  {onDelete && (
-                    <div style={{ paddingTop: 12, borderTop: `1px solid ${t.border}` }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#991B1B', marginBottom: 8, textTransform: 'uppercase' }}>
-                        Danger zone
-                      </div>
-                      <ConfirmChip
-                        label={selectedQueueItem.typeLabel === 'Deletion' ? 'Process deletion' : 'Delete report'}
-                        confirmLabel="Tap again to delete"
-                        armed={deleteArmed}
-                        onArm={() => setDeleteArmed(true)}
-                        onConfirm={onDelete}
-                        loading={deleting}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
+              {renderReportActions({ forMobileSheet: true })}
             </div>
           </div>
         )}
@@ -1629,7 +1425,7 @@ export default function UserReportsInbox({
       )}
 
       {/* ═══ COL 3 — Conversation + Reply (chat-first on narrow) ═══ */}
-      {showDetailPane && showConversationPane && selectedUserEmail && !accountFocusMode && (
+      {showDetailPane && showConversationPane && selectedUserEmail && (
       <div
         style={{
           flex: stackDetailPanes ? '1 1 auto' : '1 1 0',
@@ -1666,21 +1462,36 @@ export default function UserReportsInbox({
               ) : (
                 renderItems.map((item) => {
                   if (item.type === 'divider') {
+                    const isClosed = item.ticketStatus === 'closed' || item.ticketStatus === 'resolved';
+                    const canCloseHere = !isClosed && !showHistory && typeof onCloseFromThread === 'function'
+                      && (item.ticketId || item.feedbackId);
                     return (
                       <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
                         <div style={{ flex: 1, height: '1px', backgroundColor: t.border }} />
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'wrap', justifyContent: 'center' }}>
                           <span style={{ fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '999px', backgroundColor: item.tc.bg, color: item.tc.color, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                             {msgTypeLabel(item.ticketType)}
                           </span>
                           {item.ticketNumber && (
-                            <span style={{ fontSize: '11px', fontWeight: '600', color: t.textLight }}>#{item.ticketNumber}</span>
+                            <span style={{ fontSize: '12px', fontWeight: '700', color: t.text }}>#{item.ticketNumber}</span>
                           )}
                           {item.date && <span style={{ fontSize: '11px', color: t.textLight }}>· {formatMsgDate(item.date)}</span>}
-                          {(item.ticketStatus === 'closed' || item.ticketStatus === 'resolved') && (
+                          {isClosed && (
                             <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '999px', backgroundColor: t.isDark ? '#ffffff10' : '#00000010', color: t.textLight }}>
                               closed
                             </span>
+                          )}
+                          {canCloseHere && (
+                            <ChipButton
+                              variant="success"
+                              onClick={() => onCloseFromThread({ ticketId: item.ticketId, feedbackId: item.feedbackId })}
+                              loading={closingTicket}
+                              style={{ padding: '3px 10px', fontSize: 10 }}
+                              title={item.ticketNumber ? `Close #${item.ticketNumber}` : 'Close this report'}
+                            >
+                              <CheckCircle size={12} />
+                              Close
+                            </ChipButton>
                           )}
                         </div>
                         <div style={{ flex: 1, height: '1px', backgroundColor: t.border }} />
@@ -1692,6 +1503,7 @@ export default function UserReportsInbox({
                     msg.senderType === 'admin' || msg.senderType === 'ghost-worker' ||
                     msg.senderEmail?.includes('admin') || msg.senderEmail?.includes('thepepplanner.com');
                   const msgDate = formatMsgDate(msg.createdAt);
+                  const requestRef = msg.requestNumber || null;
                   return (
                     <div key={item.key} style={{ display: 'flex', justifyContent: isAdmin ? 'flex-end' : 'flex-start' }}>
                       <div
@@ -1704,11 +1516,14 @@ export default function UserReportsInbox({
                           borderRight: isAdmin ? `3px solid ${t.primary}` : 'none',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px', flexWrap: 'wrap' }}>
                           {isAdmin ? <ShieldCheck size={12} style={{ color: t.primary }} /> : <User size={12} style={{ color: t.primary }} />}
                           <span style={{ fontSize: '10px', fontWeight: '600', color: t.primary }}>
                             {isAdmin ? 'The Pep Planner Team' : 'User'}
                           </span>
+                          {requestRef && (
+                            <span style={{ fontSize: '10px', fontWeight: 700, color: t.textLight }}>· #{requestRef}</span>
+                          )}
                           {msgDate && <span style={{ fontSize: '10px', color: t.textLight, opacity: 0.6, marginLeft: '4px' }}>{msgDate}</span>}
                         </div>
                         <p style={{ fontSize: '13px', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap', color: t.text }}>
@@ -1752,7 +1567,11 @@ export default function UserReportsInbox({
                 <textarea
                   value={customMessage}
                   onChange={(e) => setCustomMessage(e.target.value)}
-                  placeholder={selectedQueueItem ? `Reply to ${selectedQueueItem.email}…` : 'Select a user to reply…'}
+                  placeholder={
+                    selectedQueueItem
+                      ? `Reply on ${selectedQueueItem.ticketNumber ? `#${selectedQueueItem.ticketNumber}` : 'this report'}…`
+                      : 'Select a report to reply…'
+                  }
                   rows={isNarrow ? 2 : 3}
                   disabled={!selectedQueueItem}
                   style={{
@@ -1792,6 +1611,108 @@ export default function UserReportsInbox({
             </div>
           </>
       </div>
+      )}
+
+      {/* Account tools — slide-over drawer (keeps conversation visible) */}
+      {accountExpanded && selectedUserEmail && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 90,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            backgroundColor: 'rgba(0,0,0,0.35)',
+          }}
+          onClick={() => setAccountExpanded(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label="Account tools"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: isNarrow ? '100%' : 'min(420px, 92vw)',
+              maxWidth: '100%',
+              height: '100%',
+              backgroundColor: t.cardBackground || '#fff',
+              borderLeft: isNarrow ? 'none' : `1px solid ${t.border}`,
+              boxShadow: isNarrow ? 'none' : '-12px 0 40px rgba(0,0,0,0.18)',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '12px 14px',
+                borderBottom: `1px solid ${t.border}`,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Account tools</div>
+                <div style={{ fontSize: 11, color: t.textLight, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedGroup?.email || selectedUserEmail}
+                  {activeReportContext?.ticketNumber ? ` · #${activeReportContext.ticketNumber}` : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAccountExpanded(false)}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  border: `1px solid ${t.border}`,
+                  backgroundColor: t.background || '#F9FAFB',
+                  color: t.textLight,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+                aria-label="Close account tools"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+              {isLoadingUserDetails && !hasSelectedUser && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '32px 0' }}>
+                  <AdminSpinner size={24} />
+                </div>
+              )}
+              {userSelectionError && !hasSelectedUser && (
+                <p style={{ padding: '12px 14px', fontSize: '12px', margin: 0, color: t.error || '#EF4444' }}>
+                  {userSelectionError}
+                </p>
+              )}
+              {!hasSelectedUser && !isLoadingUserDetails && !userSelectionError && (
+                <p style={{ padding: '16px 14px', fontSize: '12px', textAlign: 'center', color: t.textLight, margin: 0 }}>
+                  Select a report to load account tools
+                </p>
+              )}
+              {hasSelectedUser && selectedUser && (
+                <UserDetailPanel
+                  user={selectedUser}
+                  onClose={() => setAccountExpanded(false)}
+                  theme={t}
+                  compact
+                  reportContext={activeReportContext}
+                  onExtendTrial={onExtendTrial}
+                  isExtendingTrial={isExtendingTrial}
+                  isLoadingDetails={isLoadingUserDetails}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>

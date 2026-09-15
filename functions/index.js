@@ -5257,91 +5257,8 @@ exports.createSupportTicket = onCall(
       const FieldValue = admin.firestore.FieldValue;
       const normalizedEmail = userEmail.toLowerCase().trim();
 
-      // Check for existing OPEN ticket for this user (combine multiple requests into one thread)
-      const existingOpen = await db.collection('supportTickets')
-        .where('userEmail', '==', normalizedEmail)
-        .where('status', 'in', ['new', 'in-progress', 'open'])
-        .limit(1)
-        .get();
-
-      if (!existingOpen.empty) {
-        const existingDoc = existingOpen.docs[0];
-        const existingId = existingDoc.id;
-        const existingData = existingDoc.data();
-        const existingNumber = existingData.ticketNumber || `Z${existingId.slice(-6).toUpperCase()}`;
-
-        // Get next request number for this thread (for display: "Ticket Z005, requests #Z005, #Z006")
-        const counterRef = db.collection('_counters').doc('supportTickets');
-        let requestNumber;
-        await db.runTransaction(async (transaction) => {
-          const counterDoc = await transaction.get(counterRef);
-          let currentCount = (counterDoc.exists && counterDoc.data().count != null) ? counterDoc.data().count : 4;
-          if (currentCount === 0) currentCount = 4;
-          else currentCount++;
-          requestNumber = `Z${String(currentCount).padStart(3, '0')}`;
-          transaction.set(counterRef, { count: currentCount, lastUpdated: FieldValue.serverTimestamp() }, { merge: true });
-        });
-
-        const requestNumbers = Array.isArray(existingData.requestNumbers) ? [...existingData.requestNumbers, requestNumber] : [existingData.ticketNumber || existingNumber, requestNumber];
-
-        const messageRef = db.collection('supportTickets').doc(existingId).collection('messages').doc();
-        const messageData = {
-          messageId: messageRef.id,
-          ticketId: existingId,
-          senderType: 'user',
-          senderEmail: normalizedEmail,
-          senderName: userName || userEmail.split('@')[0],
-          message: message,
-          createdAt: FieldValue.serverTimestamp(),
-          read: false,
-          requestNumber: requestNumber,
-        };
-        if (imageUrls && Array.isArray(imageUrls) && imageUrls.length > 0) messageData.imageUrls = imageUrls;
-        if (imageStoragePaths && Array.isArray(imageStoragePaths) && imageStoragePaths.length > 0) messageData.imageStoragePaths = imageStoragePaths;
-
-        await messageRef.set(messageData);
-        await db.collection('supportTickets').doc(existingId).update({
-          updatedAt: FieldValue.serverTimestamp(),
-          lastMessageAt: FieldValue.serverTimestamp(),
-          requestNumbers: requestNumbers,
-        });
-
-        const escapeHtml = (text) => {
-          const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-          return String(text).replace(/[&<>"']/g, (m) => map[m]);
-        };
-        const safeName = escapeHtml(userName || userEmail.split('@')[0]);
-        const safeEmail = escapeHtml(userEmail);
-        const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
-        const emailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f0;">
-          <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <h2 style="color: #2F3B3A; margin-bottom: 20px;">📩 New message on existing ticket</h2>
-            <p style="color: #6B7D7A; margin: 5px 0;"><strong style="color: #2F3B3A;">Ticket #:</strong> ${existingNumber} (requests: ${requestNumbers.join(', ')})</p>
-            <p style="color: #6B7D7A; margin: 5px 0;"><strong style="color: #2F3B3A;">From:</strong> ${safeName}</p>
-            <p style="color: #6B7D7A; margin: 5px 0;"><strong style="color: #2F3B3A;">Email:</strong> ${safeEmail}</p>
-            <div style="background-color: #F5F5F0; padding: 15px; border-radius: 4px; margin-top: 20px;">
-              <p style="color: #2F3B3A; margin: 0;">${safeMessage}</p>
-            </div>
-            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #DDE6DE;">
-              <p style="color: #6B7D7A; font-size: 12px; margin: 0;">Reply in the admin panel. This message was added to the same thread.</p>
-            </div>
-          </div>
-        </div>`;
-        try {
-          const emailTimeout = new Promise((resolve) => setTimeout(() => resolve(false), 8000));
-          await Promise.race([
-            emailService.sendEmail('contact@thepepplanner.com', `📩 New message on ticket ${existingNumber}`, emailHtml),
-            emailTimeout
-          ]);
-        } catch (e) {
-          logger.warn('Appended-ticket email failed:', e.message);
-        }
-        logger.info(`✅ Appended message to existing ticket: ${existingId} (${existingNumber}), request ref: ${requestNumber}`);
-        return { success: true, ticketId: existingId, ticketNumber: existingNumber, appended: true, requestNumber };
-      }
-
-      // No open ticket — create new ticket
+      // Always create a new ticket so each report gets its own support # and can be closed independently.
+      // Admin inbox still groups by user email into one blended timeline.
       const counterRef = db.collection('_counters').doc('supportTickets');
       let ticketNumber;
       
@@ -5404,7 +5321,7 @@ exports.createSupportTicket = onCall(
       const ticketData = {
         ticketId: ticketRef.id,
         ticketNumber: ticketNumber,
-        requestNumbers: [ticketNumber], // Combined thread: all request refs (e.g. Z005, Z006)
+        requestNumbers: [ticketNumber],
         userId: userId || userAccountInfo?.userId || null,
         userEmail: normalizedEmail,
         userName: userName || userEmail.split('@')[0],
